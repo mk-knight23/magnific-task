@@ -1,0 +1,1876 @@
+# STEP 1: PROBLEM UNDERSTANDING
+
+## Problem Restatement
+
+Build **Magnific**, a creative automation pipeline that transforms two character reference images and a creative brief into a set of short animated video clips. The system must:
+
+1. Use Gemini to analyze images and generate structured scene prompts
+2. Use an image generation model to produce preview stills maintaining character consistency
+3. Use Veo to animate each preview into a cinematic clip
+4. Maintain full state through manifest files between stages
+5. Support resumability, partial failure handling, and complete external configuration
+
+## Implicit Requirements
+
+| Implicit Need | Why It Matters |
+|---------------|----------------|
+| Character consistency across outputs | Without it, the output is useless — different-looking characters per scene |
+| Veo is async (submit + poll) | Cannot block synchronously; need proper async polling |
+| Reference images must be encoded with each API call | Models need to "see" the characters to maintain consistency |
+| Job isolation is non-negotiable | Running multiple jobs simultaneously must never corrupt outputs |
+| Manifests must be self-contained | Each stage should be runnable with only its input manifest |
+| Wall time ≈ slowest video, not sum | User experience demands concurrent video generation |
+
+## Hidden Constraints
+
+1. **Google's API rate limits vary by tier** — we cannot assume unlimited QPS
+2. **Safety filters can trigger at any stage** — a "safe" prompt might still get blocked due to image content
+3. **Imagen 3 has specific reference image handling** — need to use the correct API surface
+4. **Veo operations can get "stuck"** — need timeout handling beyond just retry
+5. **Large images may exceed API limits** — need validation/preprocessing
+
+## Assumptions
+
+1. `GOOGLE_API_KEY` has access to: Gemini 1.5 Pro, Imagen 3, Veo 2.0
+2. Reference images are JPEG/PNG, under 10MB each
+3. Typical job produces 4-12 scenes
+4. Video clips are ≤10 seconds each
+5. Single-user local execution (no multi-tenant concerns)
+6. Local filesystem is reliable and fast
+
+## Success Criteria
+
+- [ ] End-to-end: Two images + text → directory of MP4 files
+- [ ] Any single scene failure does not crash the job
+- [ ] `--from-stage preview` correctly skips story generation
+- [ ] Changing any model/prompt/path requires zero code changes
+- [ ] All tests pass without API keys
+- [ ] A senior engineer can understand the architecture in <15 minutes
+
+---
+
+# STEP 2: SYSTEM ARCHITECTURE
+
+## High-Level Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              CLI LAYER                                       │
+│  generate-config │ run [--from-stage] │ status [--job-id]                   │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           ORCHESTRATOR                                       │
+│  • Loads & validates config                                                  │
+│  • Creates/loads Job context                                                 │
+│  • Determines which stages to run (resume logic)                             │
+│  • Coordinates stage execution order                                         │
+│  • Writes job_status.json after each stage                                  │
+└─────────────────────────────────────────────────────────────────────────────┘
+         │                    │                    │
+         ▼                    ▼                    ▼
+┌───────────────┐    ┌───────────────┐    ┌───────────────┐
+│  STORY STAGE  │───▶│ PREVIEW STAGE │───▶│  VIDEO STAGE  │
+│               │    │               │    │               │
+│ Input:        │    │ Input:        │    │ Input:        │
+│  - ref imgs   │    │  - story mfst │    │  - prev mfst  │
+│  - brief      │    │  - ref imgs   │    │  - prev imgs  │
+│               │    │               │    │               │
+│ Output:       │    │ Output:       │    │ Output:       │
+│  story_mf.json│    │  prev_mf.json │    │  vid_mf.json  │
+│               │    │  + PNG files  │    │  + MP4 files  │
+│ Model: Gemini │    │ Model: Imagen │    │ Model: Veo    │
+│ Concurrency: 1│    │ Concurrency:N │    │ Concurrency:N │
+└───────────────┘    └───────────────┘    └───────────────┘
+         │                    │                    │
+         └────────────────────┼────────────────────┘
+                              ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        MANIFEST CHAIN                                       │
+│                                                                             │
+│  story_manifest.json ──contains──▶ scenes[] with prompts                    │
+│         │                                                                   │
+│         ▼                                                                   │
+│  preview_manifest.json ──contains──▶ scenes[] + preview_path per scene      │
+│         │                                                                   │
+│         ▼                                                                   │
+│  video_manifest.json ──contains──▶ scenes[] + video_path per scene          │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+## Components and Responsibilities
+
+| Component | Responsibility | Key Interface |
+|-----------|----------------|---------------|
+| `Orchestrator` | Pipeline coordination, stage orchestration, resume logic | `async run(config, job, from_stage)` |
+| `BaseStage` | Abstract contract for all stages | `async execute() -> Manifest` |
+| `StoryStage` | Gemini call, JSON parsing, scene validation | Inherits BaseStage |
+| `PreviewStage` | Concurrent Imagen calls, image download, error tracking | Inherits BaseStage |
+| `VideoStage` | Async Veo submit, concurrent polling, MP4 download | Inherits BaseStage |
+| `ConfigLoader` | Load, merge, validate configuration | `load(path) -> PipelineConfig` |
+| `JobManager` | Job ID generation, directory creation, status I/O | `create_job() -> Job` |
+| `Manifest` | Typed data classes + serialization for each stage | `to_json() / from_json()` |
+| `RetryHandler` | Exponential backoff, retryable error classification | `async with_retry(fn, config)` |
+| `GoogleGeminiClient` | Low-level Gemini API wrapper | `async generate_content(...)` |
+| `GoogleImagenClient` | Low-level Imagen API wrapper | `async generate_image(...)` |
+| `GoogleVeoClient` | Low-level Veo API wrapper | `async submit() / async poll()` |
+
+## Stage-Wise Breakdown
+
+### Stage 1: Story Generation
+
+**Input:**
+- Two reference images (local paths)
+- Creative brief text
+
+**Process:**
+1. Load reference images as base64
+2. Construct multimodal prompt with system instructions
+3. Call Gemini with structured output request
+4. Parse response into `StoryManifest`
+5. Validate scene count, required fields
+6. Write `story_manifest.json`
+
+**Output:** `story_manifest.json`
+```json
+{
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "stage": "story",
+  "status": "complete",
+  "created_at": "2024-01-15T10:30:00Z",
+  "input_summary": {
+    "brief": "a loving couple going through daily life...",
+    "character_count": 2
+  },
+  "scenes": [
+    {
+      "scene_id": "scene_001",
+      "scene_number": 1,
+      "title": "Morning Tension",
+      "image_prompt": "A cinematic shot of [character 1] and [character 2]...",
+      "video_prompt": "Subtle movement as [character 1] turns away...",
+      "duration_seconds": 5,
+      "status": "pending"
+    }
+  ]
+}
+```
+
+### Stage 2: Preview Generation
+
+**Input:**
+- `story_manifest.json`
+- Reference images
+
+**Process:**
+1. Load story manifest
+2. Identify scenes needing generation (status=pending or missing output)
+3. Create semaphore with configured concurrency
+4. For each scene (concurrently within semaphore):
+   a. Encode reference images + preview prompt
+   b. Call Imagen with reference images
+   c. Download generated image
+   d. Update scene status
+5. Write `preview_manifest.json`
+
+**Output:** `preview_manifest.json` + PNG files
+```json
+{
+  "job_id": "...",
+  "stage": "preview",
+  "status": "partial",
+  "created_at": "...",
+  "scenes": [
+    {
+      "scene_id": "scene_001",
+      "title": "Morning Tension",
+      "image_prompt": "...",
+      "preview_path": "previews/scene_001.png",
+      "status": "success",
+      "error": null
+    },
+    {
+      "scene_id": "scene_002",
+      "title": "The Argument",
+      "image_prompt": "...",
+      "preview_path": null,
+      "status": "failed",
+      "error": "Safety filter blocked: content policy violation"
+    }
+  ]
+}
+```
+
+### Stage 3: Video Animation
+
+**Input:**
+- `preview_manifest.json`
+- Preview images (only successful ones)
+
+**Process:**
+1. Load preview manifest
+2. Filter to scenes with status=success
+3. Submit all video generation requests (respecting rate limit)
+4. Poll all operations concurrently
+5. Download completed videos
+6. Write `video_manifest.json`
+
+**Output:** `video_manifest.json` + MP4 files
+
+## Manifest Design
+
+**Design Principles:**
+1. **Self-contained**: Each manifest has everything needed for its downstream stage
+2. **Traceable**: `job_id` links all manifests; `scene_id` links scenes across manifests
+3. **Resumable**: Per-scene status allows skipping completed work
+4. **Auditable**: Timestamps, error messages, status fields
+5. **Validatable**: Strict Pydantic schemas catch corruption
+
+## Job Lifecycle and State Management
+
+```
+┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐
+│ CREATED  │───▶│ RUNNING  │───▶│ COMPLETE │    │  FAILED  │    │ PARTIAL  │
+└──────────┘    └──────────┘    └──────────┘    └──────────┘    └──────────┘
+                     │                                              │
+                     │         ┌──────────┐                        │
+                     └────────▶│ PAUSED   │────────────────────────┘
+                               └──────────┘    (on user interrupt)
+```
+
+**job_status.json:**
+```json
+{
+  "job_id": "...",
+  "status": "running",
+  "current_stage": "preview",
+  "created_at": "...",
+  "updated_at": "...",
+  "stage_progress": {
+    "story": "complete",
+    "preview": "running",
+    "video": "pending"
+  },
+  "error": null,
+  "config_hash": "sha256:..."
+}
+```
+
+---
+
+# STEP 3: CONCURRENCY & EXECUTION MODEL
+
+## Concurrency Points
+
+| Location | Concurrency Type | Reason |
+|----------|------------------|--------|
+| Preview generation | Task-based parallelism | N scenes can generate independently |
+| Video submission | Task-based parallelism | Submit requests are independent |
+| Video polling | Task-based parallelism | Poll operations are independent |
+| Story generation | None | Single LLM call produces all scenes |
+
+## Async vs Sync Decision
+
+**Decision: Full async throughout**
+
+**Reasoning:**
+1. Veo polling is fundamentally async (submit → wait → check)
+2. Multiple image generations benefit from concurrent I/O
+3. Python's `asyncio` provides first-class concurrency without thread complexity
+4. Google's Python SDK supports async natively (`google-cloud-aiplatform` with `asyncio`)
+5. Single-threaded async avoids GIL contention
+6. Simpler mental model: one event loop, no locks needed for API calls
+
+**Trade-off acknowledged:** If we needed CPU-bound work (e.g., image processing), we'd need `run_in_executor`. For this pipeline, all heavy work is I/O-bound API calls.
+
+## Rate Limit Handling
+
+```python
+class RateLimiter:
+    """Token bucket rate limiter for API calls."""
+    
+    def __init__(self, calls_per_minute: int):
+        self.interval = 60.0 / calls_per_minute
+        self._last_call = 0.0
+        self._lock = asyncio.Lock()
+    
+    async def acquire(self):
+        async with self._lock:
+            now = time.monotonic()
+            wait = self._last_call + self.interval - now
+            if wait > 0:
+                await asyncio.sleep(wait)
+            self._last_call = time.monotonic()
+
+class ConcurrencySemaphore:
+    """Combines rate limiting with max concurrent requests."""
+    
+    def __init__(self, max_concurrent: int, rate_limiter: RateLimiter):
+        self.semaphore = asyncio.Semaphore(max_concurrent)
+        self.rate_limiter = rate_limiter
+    
+    async def __aenter__(self):
+        await self.semaphore.acquire()
+        await self.rate_limiter.acquire()
+        return self
+    
+    async def __aexit__(self, *args):
+        self.semaphore.release()
+```
+
+## Video Polling Strategy
+
+```
+Time ──────────────────────────────────────────────────────────────────────▶
+
+Submit V1 ──┐
+Submit V2 ──┼──▶ [All submitted] ──▶ Poll V1 ──┐
+Submit V3 ──┘                         Poll V2 ──┼──▶ [All done]
+                                     Poll V3 ──┘
+
+Wall time = max(poll_v1, poll_v2, poll_v3)
+NOT: sum(poll_v1, poll_v2, poll_v3)
+```
+
+**Implementation:**
+```python
+async def generate_all_videos(
+    scenes: list[Scene],
+    concurrency: ConcurrencySemaphore,
+    poll_config: PollConfig,
+) -> list[VideoResult]:
+    # Phase 1: Submit all (sequentially to respect rate limits)
+    operations = []
+    for scene in scenes:
+        op_id = await submit_video(scene, concurrency)
+        operations.append((scene, op_id))
+    
+    # Phase 2: Poll all concurrently
+    tasks = [
+        poll_until_complete(scene, op_id, poll_config)
+        for scene, op_id in operations
+    ]
+    return await asyncio.gather(*tasks, return_exceptions=True)
+```
+
+---
+
+# STEP 4: CONFIGURATION DESIGN
+
+## What Goes in Config vs Code
+
+| Category | Config | Code |
+|----------|--------|------|
+| Model names/versions | ✓ | |
+| API parameters (temp, tokens) | ✓ | |
+| Prompts/system instructions | ✓ | |
+| Paths (output dir, etc.) | ✓ | |
+| Retry parameters | ✓ | |
+| Concurrency limits | ✓ | |
+| Retry logic implementation | | ✓ |
+| Manifest schema | | ✓ |
+| Provider abstractions | | ✓ |
+| Error classification | | ✓ |
+
+## Example Configuration
+
+```yaml
+# config/default.yaml
+job:
+  base_output_dir: "./jobs"
+  copy_references: true
+
+models:
+  story:
+    provider: "google"
+    name: "gemini-1.5-pro-002"
+    temperature: 0.7
+    max_output_tokens: 8192
+    response_mime_type: "application/json"
+  
+  preview:
+    provider: "google"
+    name: "imagen-3.0-generate-002"
+    aspect_ratio: "16:9"
+    sample_count: 1
+    person_generation: "allow_all"
+  
+  video:
+    provider: "google"
+    name: "veo-2.0-generate-001"
+    aspect_ratio: "16:9"
+    duration_seconds: 5
+    sample_count: 1
+
+story:
+  scene_count:
+    min: 4
+    max: 8
+  prompts:
+    system: |
+      You are a creative story architect specializing in visual storytelling.
+      Given character reference images and a creative brief, generate a series
+      of scene descriptions that can be turned into short animated clips.
+      
+      Each scene must:
+      - Feature the exact characters from the reference images
+      - Have a clear narrative progression
+      - Be visually distinct from other scenes
+      - Work as a standalone 5-second clip
+    
+    user_template: |
+      Here are two character references:
+      - Character 1: [see attached image]
+      - Character 2: [see attached image]
+      
+      Creative brief: {brief}
+      
+      Generate {min_scenes} to {max_scenes} scenes.
+
+preview:
+  concurrency:
+    max_concurrent: 3
+    calls_per_minute: 20
+  
+  prompts:
+    template: |
+      {image_prompt}
+      
+      Important: Maintain exact character appearances from reference images.
+
+video:
+  concurrency:
+    max_concurrent: 5
+    calls_per_minute: 10
+  
+  polling:
+    initial_delay_seconds: 5
+    interval_seconds: 10
+    max_attempts: 60
+    backoff_multiplier: 1.3
+
+retry:
+  max_attempts: 3
+  base_delay_seconds: 2.0
+  max_delay_seconds: 60.0
+  backoff_multiplier: 2.0
+  jitter: true
+  retryable_error_codes:
+    - "RESOURCE_EXHAUSTED"
+    - "UNAVAILABLE"
+    - "DEADLINE_EXCEEDED"
+    - "INTERNAL"
+  non_retryable_error_codes:
+    - "INVALID_ARGUMENT"
+    - "NOT_FOUND"
+    - "PERMISSION_DENIED"
+
+logging:
+  level: "INFO"
+  format: "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+  file_enabled: true
+```
+
+## Environment Variables
+
+| Variable | Purpose | Required |
+|----------|---------|----------|
+| `GOOGLE_API_KEY` | Google AI API authentication | Yes |
+| `MAGNIFIC_CONFIG` | Path to custom config file | No |
+| `MAGNIFIC_LOG_LEVEL` | Override log level | No |
+
+**Design decision:** API keys NEVER go in config files. Config is committed to git; keys are not.
+
+## Validation Strategy
+
+```python
+from pydantic import BaseModel, Field, field_validator
+from typing import Literal
+
+class StoryModelConfig(BaseModel):
+    provider: Literal["google"] = "google"
+    name: str = Field(min_length=1)
+    temperature: float = Field(ge=0.0, le=2.0)
+    max_output_tokens: int = Field(ge=1, le=65536)
+    response_mime_type: str = "application/json"
+
+class ConcurrencyConfig(BaseModel):
+    max_concurrent: int = Field(ge=1, le=20)
+    calls_per_minute: int = Field(ge=1, le=100)
+    
+    @field_validator("max_concurrent")
+    @classmethod
+    def validate_concurrency(cls, v):
+        if v > 10:
+            logger.warning(f"High concurrency ({v}) may trigger rate limits")
+        return v
+
+class PipelineConfig(BaseModel):
+    job: JobConfig
+    models: ModelsConfig
+    story: StoryConfig
+    preview: PreviewConfig
+    video: VideoConfig
+    retry: RetryConfig
+    logging: LoggingConfig
+    
+    @field_validator("models")
+    @classmethod
+    def validate_provider_consistency(cls, v):
+        providers = {v.story.provider, v.preview.provider, v.video.provider}
+        if len(providers) > 1:
+            raise ValueError("Mixed providers not yet supported")
+        return v
+```
+
+---
+
+# STEP 5: FAILURE HANDLING & RESILIENCE
+
+## Complete Failure Scenario Matrix
+
+| Scenario | Stage | Error Type | Retryable? | Handling |
+|----------|-------|------------|------------|----------|
+| Rate limit (429/RESOURCE_EXHAUSTED) | Any | Transient | Yes | Backoff + retry |
+| Network timeout | Any | Transient | Yes | Backoff + retry |
+| Service unavailable (503) | Any | Transient | Yes | Backoff + retry |
+| Safety filter (image prompt) | Preview | Permanent | No | Mark scene failed, continue |
+| Safety filter (video) | Video | Permanent | No | Mark scene failed, continue |
+| Safety filter (story) | Story | Permanent | No | Retry with modified prompt once, then fail |
+| Invalid JSON from LLM | Story | Transient | Yes (once) | Retry with stricter prompt |
+| Missing required field in JSON | Story | Transient | Yes (once) | Retry with validation hint |
+| Image download failed | Preview | Transient | Yes | Retry |
+| Corrupt image file | Preview | Permanent | No | Mark scene failed |
+| Veo operation failed | Video | Permanent | No | Mark scene failed |
+| Veo operation stuck (timeout) | Video | Timeout | No | Mark scene failed |
+| Invalid reference image | Any | Input | No | Fail job immediately |
+| Reference image too large | Any | Input | No | Fail job immediately |
+| Config validation error | Any | Input | No | Fail immediately, show errors |
+| Disk full | Any | System | No | Fail immediately |
+| Job directory exists | Any | State | No | Load existing job (resume) |
+
+## Retry Strategy
+
+```python
+@dataclass
+class RetryResult:
+    success: bool
+    value: Any = None
+    error: Optional[Exception] = None
+    attempts: int = 0
+    total_delay: float = 0.0
+
+async def with_retry(
+    fn: Callable[[], Awaitable[T]],
+    config: RetryConfig,
+    error_classifier: Callable[[Exception], ErrorClass],
+) -> T:
+    """
+    Execute fn with exponential backoff retry.
+    
+    Error classification:
+    - RETRYABLE: Transient errors, will retry
+    - PERMANENT: Won't retry, raises immediately
+    - RATE_LIMITED: Special handling, longer backoff
+    """
+    last_error: Optional[Exception] = None
+    total_delay = 0.0
+    
+    for attempt in range(1, config.max_attempts + 1):
+        try:
+            return await fn()
+        except Exception as e:
+            error_class = error_classifier(e)
+            
+            if error_class == ErrorClass.PERMANENT:
+                logger.error(f"Permanent error, not retrying: {e}")
+                raise
+            
+            last_error = e
+            remaining = config.max_attempts - attempt
+            
+            if remaining == 0:
+                break
+            
+            # Calculate delay with jitter
+            base_delay = config.base_delay_seconds * (config.backoff_multiplier ** (attempt - 1))
+            delay = min(base_delay, config.max_delay_seconds)
+            
+            if config.jitter:
+                delay = delay * (0.5 + random.random() * 0.5)
+            
+            if error_class == ErrorClass.RATE_LIMITED:
+                delay *= 2  # Extra backoff for rate limits
+                # Respect Retry-After header if present
+                retry_after = extract_retry_after(e)
+                if retry_after:
+                    delay = max(delay, retry_after)
+            
+            logger.warning(
+                f"Attempt {attempt}/{config.max_attempts} failed: {e}. "
+                f"Retrying in {delay:.1f}s ({remaining} remaining)"
+            )
+            await asyncio.sleep(delay)
+            total_delay += delay
+    
+    raise RetryExhaustedError(last_error, config.max_attempts, total_delay)
+```
+
+## Idempotency Approach
+
+```python
+def should_generate_scene(
+    scene: SceneManifest,
+    stage_dir: Path,
+    output_field: str = "output_path",
+) -> bool:
+    """
+    Determine if a scene needs (re)generation.
+    
+    A scene is considered complete if:
+    1. Status is "success"
+    2. Output file exists and is non-empty
+    """
+    if scene.status != "success":
+        return True
+    
+    output_path = getattr(scene, output_field, None)
+    if not output_path:
+        return True
+    
+    full_path = stage_dir / output_path
+    if not full_path.exists():
+        logger.warning(f"Scene marked success but file missing: {full_path}")
+        return True
+    
+    if full_path.stat().st_size == 0:
+        logger.warning(f"Scene file is empty: {full_path}")
+        return True
+    
+    return False
+```
+
+## Resume/Restart Logic
+
+```python
+class ResumeStrategy:
+    """Determines what work needs to be done when resuming."""
+    
+    def __init__(self, job: Job, from_stage: Optional[str]):
+        self.job = job
+        self.from_stage = from_stage
+    
+    def get_execution_plan(self) -> list[tuple[str, bool]]:
+        """
+        Returns list of (stage_name, should_run) tuples.
+        
+        Logic:
+        - If --from-stage specified: run that stage and all after
+        - Otherwise: check each stage's manifest for completion
+        """
+        stages = ["story", "preview", "video"]
+        plan = []
+        
+        if self.from_stage:
+            start_idx = stages.index(self.from_stage)
+            for stage in stages[start_idx:]:
+                plan.append((stage, True))
+        else:
+            for stage in stages:
+                manifest = self.job.load_manifest(stage)
+                if manifest is None:
+                    plan.append((stage, True))
+                elif manifest.status == "complete":
+                    plan.append((stage, False))
+                elif manifest.status == "partial":
+                    plan.append((stage, True))  # Re-run to fill gaps
+                else:
+                    plan.append((stage, True))
+        
+        return plan
+```
+
+## Logging and Observability
+
+```python
+# Structured logging for each stage
+def log_stage_start(stage: str, job_id: str, scene_count: int):
+    logger.info(
+        "stage_start",
+        extra={
+            "stage": stage,
+            "job_id": job_id,
+            "scene_count": scene_count,
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+    )
+
+def log_scene_result(
+    stage: str,
+    scene_id: str,
+    status: str,
+    duration_seconds: float,
+    error: Optional[str] = None,
+):
+    log_level = logging.INFO if status == "success" else logging.WARNING
+    logger.log(
+        log_level,
+        "scene_result",
+        extra={
+            "stage": stage,
+            "scene_id": scene_id,
+            "status": status,
+            "duration_seconds": duration_seconds,
+            "error": error,
+        }
+    )
+```
+
+---
+
+# STEP 6: EXTENSIBILITY DESIGN
+
+## Adding a New Stage (Audio Generation)
+
+**Step 1:** Create stage module
+```python
+# src/magnific/stages/audio.py
+class AudioStage(BaseStage):
+    """Generate background music/narration for each scene."""
+    
+    def __init__(self, config: PipelineConfig, job: Job):
+        super().__init__(config, job)
+        self.provider = get_provider(config.models.audio.provider, "audio")
+    
+    async def execute(self, input_manifest: VideoManifest) -> AudioManifest:
+        # Implementation
+        ...
+```
+
+**Step 2:** Add to stage registry
+```python
+# src/magnific/stages/__init__.py
+STAGE_REGISTRY: dict[str, type[BaseStage]] = {
+    "story": StoryStage,
+    "preview": PreviewStage,
+    "video": VideoStage,
+    "audio": AudioStage,  # New
+}
+
+STAGE_ORDER = ["story", "preview", "video", "audio"]  # Updated
+```
+
+**Step 3:** Add config section
+```yaml
+models:
+  audio:
+    provider: "google"
+    name: "music-generation-model"
+    
+audio:
+  concurrency:
+    max_concurrent: 3
+  style: "cinematic"
+```
+
+**No other code changes required.**
+
+## Swapping Providers
+
+```python
+# src/magnific/providers/base.py
+from abc import ABC, abstractmethod
+from pathlib import Path
+from typing import Optional
+
+class StoryGenerator(ABC):
+    """Interface for story/prompt generation."""
+    
+    @abstractmethod
+    async def generate_scenes(
+        self,
+        reference_images: list[Path],
+        brief: str,
+        config: StoryModelConfig,
+        prompt_config: StoryPromptConfig,
+    ) -> list[SceneData]:
+        ...
+
+class ImageGenerator(ABC):
+    """Interface for preview image generation."""
+    
+    @abstractmethod
+    async def generate(
+        self,
+        prompt: str,
+        reference_images: list[Path],
+        output_path: Path,
+        config: PreviewModelConfig,
+    ) -> ImageResult:
+        ...
+
+class VideoGenerator(ABC):
+    """Interface for video generation."""
+    
+    @abstractmethod
+    async def submit(
+        self,
+        prompt: str,
+        reference_image: Path,
+        config: VideoModelConfig,
+    ) -> str:  # operation_id
+        ...
+    
+    @abstractmethod
+    async def poll(
+        self,
+        operation_id: str,
+        output_path: Path,
+        config: VideoModelConfig,
+        poll_config: PollConfig,
+    ) -> VideoResult:
+        ...
+
+class AudioGenerator(ABC):
+    """Interface for audio generation."""
+    
+    @abstractmethod
+    async def generate(
+        self,
+        prompt: str,
+        video_path: Path,
+        output_path: Path,
+        config: AudioModelConfig,
+    ) -> AudioResult:
+        ...
+```
+
+## Provider Registration
+
+```python
+# src/magnific/providers/__init__.py
+from typing import Dict, Type, Any
+
+class ProviderRegistry:
+    """Registry for provider implementations."""
+    
+    _providers: Dict[str, Dict[str, Type]] = {
+        "google": {},
+        # Future: "openai": {}, "anthropic": {}, etc.
+    }
+    
+    @classmethod
+    def register(cls, provider: str, capability: str, impl: Type):
+        if provider not in cls._providers:
+            cls._providers[provider] = {}
+        cls._providers[provider][capability] = impl
+    
+    @classmethod
+    def get(cls, provider: str, capability: str) -> Type:
+        try:
+            return cls._providers[provider][capability]
+        except KeyError:
+            raise ValueError(
+                f"No {capability} provider registered for '{provider}'. "
+                f"Available: {cls._providers}"
+            )
+
+def get_provider(provider: str, capability: str) -> Any:
+    return ProviderRegistry.get(provider, capability)
+
+# Auto-register Google providers on import
+from magnific.providers.google import gemini, imagen, veo
+ProviderRegistry.register("google", "story", gemini.GoogleStoryGenerator)
+ProviderRegistry.register("google", "image", imagen.GoogleImageGenerator)
+ProviderRegistry.register("google", "video", veo.GoogleVideoGenerator)
+```
+
+## Future: OpenAI Provider
+
+```python
+# src/magnific/providers/openai/image.py
+class OpenAIImageGenerator(ImageGenerator):
+    """DALL-E 3 implementation."""
+    
+    def __init__(self, api_key: str):
+        self.client = AsyncOpenAI(api_key=api_key)
+    
+    async def generate(
+        self,
+        prompt: str,
+        reference_images: list[Path],
+        output_path: Path,
+        config: PreviewModelConfig,
+    ) -> ImageResult:
+        # DALL-E doesn't support reference images the same way
+        # We'd need to describe characters in the prompt
+        response = await self.client.images.generate(
+            model=config.name,  # "dall-e-3"
+            prompt=self._adapt_prompt(prompt, reference_images),
+            size="1792x1024",  # 16:9
+            n=1,
+        )
+        
+        # Download and save
+        image_url = response.data[0].url
+        await self._download(image_url, output_path)
+        
+        return ImageResult(success=True, path=str(output_path))
+```
+
+---
+
+# STEP 7: PROJECT STRUCTURE
+
+```
+magnific/
+├── src/
+│   └── magnific/
+│       ├── __init__.py              # Package version, public API
+│       ├── __main__.py              # python -m magnific entry point
+│       │
+│       ├── cli/                     # CLI layer - thin, delegates to core
+│       │   ├── __init__.py
+│       │   ├── app.py               # Click app definition
+│       │   ├── generate_config.py   # generate-config command
+│       │   ├── run.py               # run command
+│       │   └── status.py            # status command
+│       │
+│       ├── config/                  # Configuration management
+│       │   ├── __init__.py
+│       │   ├── models.py            # Pydantic config models
+│       │   └── loader.py            # Load, merge, validate configs
+│       │
+│       ├── core/                    # Shared primitives (no stage-specific logic)
+│       │   ├── __init__.py
+│       │   ├── job.py               # Job ID, directory structure, status
+│       │   ├── manifest.py          # Manifest data classes + I/O
+│       │   ├── retry.py             # Retry handler with backoff
+│       │   ├── rate_limiter.py      # Rate limiting primitives
+│       │   └── errors.py            # Custom exception hierarchy
+│       │
+│       ├── stages/                  # Pipeline stages
+│       │   ├── __init__.py          # Stage registry
+│       │   ├── base.py              # BaseStage abstract class
+│       │   ├── story.py             # Stage 1: Story generation
+│       │   ├── preview.py           # Stage 2: Preview generation
+│       │   └── video.py             # Stage 3: Video animation
+│       │
+│       ├── providers/               # External API integrations
+│       │   ├── __init__.py          # Provider registry
+│       │   ├── base.py              # Abstract interfaces
+│       │   └── google/              # Google AI implementations
+│       │       ├── __init__.py
+│       │       ├── client.py        # Shared Google client setup
+│       │       ├── gemini.py        # Gemini (story generation)
+│       │       ├── imagen.py        # Imagen (preview generation)
+│       │       └── veo.py           # Veo (video generation)
+│       │
+│       └── orchestrator.py          # Pipeline coordination
+│
+├── config/
+│   └── default.yaml                 # Default configuration template
+│
+├── tests/
+│   ├── __init__.py
+│   ├── conftest.py                  # Shared fixtures, mock factories
+│   ├── fixtures/                    # Test data (sample images, manifests)
+│   │   ├── sample_character_1.jpg
+│   │   ├── sample_character_2.jpg
+│   │   └── sample_story_manifest.json
+│   │
+│   ├── unit/
+│   │   ├── test_config.py           # Config loading, validation
+│   │   ├── test_manifest.py         # Manifest serialization
+│   │   ├── test_retry.py            # Retry logic
+│   │   ├── test_rate_limiter.py     # Rate limiting
+│   │   └── test_job.py              # Job management
+│   │
+│   ├── stages/
+│   │   ├── test_story.py            # Story stage (mocked API)
+│   │   ├── test_preview.py          # Preview stage (mocked API)
+│   │   └── test_video.py            # Video stage (mocked API)
+│   │
+│   └── integration/
+│       └── test_orchestrator.py     # Full pipeline (mocked APIs)
+│
+├── docs/
+│   └── prompts/                     # Prompt templates
+│       └── story_system.txt         # Default story system prompt
+│
+├── ARCHITECTURE.md
+├── README.md
+├── CHANGELOG.md
+├── pyproject.toml
+└── .gitignore
+```
+
+## Structure Rationale
+
+| Decision | Reasoning |
+|----------|-----------|
+| `cli/` separate from `core/` | CLI is presentation layer; core should be usable programmatically |
+| `config/` as own module | Config is complex (Pydantic models + loading logic), deserves isolation |
+| `core/` for shared primitives | Prevents circular imports, makes dependencies explicit |
+| `stages/` flat (not nested) | Only 3 stages; nesting adds complexity without benefit |
+| `providers/google/` nested | Provider implementations are substantial; may add more providers |
+| `tests/` mirrors source | Easy to find test for any module |
+| `tests/unit/` vs `tests/stages/` | Unit tests for utilities, stage tests for stage-specific logic |
+| `docs/prompts/` external | Prompts are config, not code; easier to iterate |
+
+---
+
+# STEP 8: CLI DESIGN
+
+## Command Structure
+
+```
+magnific
+├── generate-config    # Create workflow config from idea
+├── run                # Execute pipeline
+│   ├── --config       # Path to workflow config
+│   ├── --from-stage   # Resume from stage
+│   └── --only-stage   # Run single stage
+└── status             # Inspect job state
+    ├── --job-id       # Specific job
+    └── --recent       # List recent jobs
+```
+
+## Command Details
+
+### `generate-config`
+
+```bash
+# Basic usage
+python -m magnific generate-config \
+  --idea "a loving couple going through daily life — arguments, chores, reconciliation" \
+  --character1 ./photos/wife.jpg \
+  --character2 ./photos/husband.jpg \
+  --output ./couple_workflow.yaml
+
+# With options
+python -m magnific generate-config \
+  --idea "two friends on a road trip across America" \
+  --character1 ./photos/alice.jpg \
+  --character2 ./photos/bob.jpg \
+  --output ./roadtrip.yaml \
+  --scene-count 10 \
+  --video-duration 8 \
+  --aspect-ratio 16:9
+```
+
+**Output:** YAML file with merged config + job-specific inputs
+```yaml
+# couple_workflow.yaml
+_inputs:
+  idea: "a loving couple going through daily life..."
+  character1: "./photos/wife.jpg"
+  character2: "./photos/husband.jpg"
+
+# Merged from default.yaml (user can override)
+models:
+  story:
+    name: "gemini-1.5-pro-002"
+  # ... rest of config
+```
+
+### `run`
+
+```bash
+# Full pipeline
+python -m magnific run --config ./couple_workflow.yaml
+
+# Resume from preview stage (skip story)
+python -m magnific run --config ./couple_workflow.yaml --from-stage preview
+
+# Run only video stage
+python -m magnific run --config ./couple_workflow.yaml --only-stage video
+
+# Override config values
+python -m magnific run \
+  --config ./couple_workflow.yaml \
+  --set models.story.name=gemini-2.0-flash \
+  --set preview.concurrency.max_concurrent=5
+```
+
+**Behavior:**
+1. Validate config
+2. Load or create job
+3. Print job ID immediately (for tracking)
+4. Execute stages with progress output
+5. Print summary on completion
+
+### `status`
+
+```bash
+# Specific job
+python -m magnific status --job-id 550e8400-e29b-41d4-a716-446655440000
+
+# Output:
+# Job: 550e8400-e29b-41d4-a716-446655440000
+# Status: partial
+# Created: 2024-01-15 10:30:00
+# Updated: 2024-01-15 10:45:23
+# 
+# Stage Progress:
+#   [✓] story     - 6 scenes generated
+#   [~] preview   - 4/6 complete, 2 failed
+#   [ ] video     - pending
+#
+# Failed Scenes:
+#   scene_003: Safety filter blocked
+#   scene_005: Rate limit exhausted
+#
+# Output Directory: ./jobs/550e8400-.../
+
+# List recent jobs
+python -m magnific status --recent 5
+
+# Output:
+# JOB ID                              STATUS    CREATED             STAGES
+# 550e8400-e29b-41d4-a716-446655440000 partial   2024-01-15 10:30   1/3
+# abc12345-6789-0abc-def1-234567890123 complete  2024-01-14 15:22   3/3
+# def67890-1234-5678-9abc-def012345678 failed    2024-01-14 09:11   0/3
+```
+
+## CLI Implementation (Click)
+
+```python
+# src/magnific/cli/app.py
+import click
+from pathlib import Path
+
+@click.group()
+@click.option("--config", "-c", type=Path, help="Global config override")
+@click.pass_context
+def cli(ctx: click.Context, config: Path | None):
+    """Magnific - Creative video pipeline from character references."""
+    ctx.ensure_object(dict)
+    if config:
+        ctx.obj["global_config"] = config
+
+@cli.command()
+@click.option("--idea", "-i", required=True, help="Creative brief")
+@click.option("--character1", "-1", required=True, type=Path, help="First character image")
+@click.option("--character2", "-2", required=True, type=Path, help="Second character image")
+@click.option("--output", "-o", required=True, type=Path, help="Output config path")
+@click.option("--scene-count", type=int, help="Number of scenes to generate")
+@click.option("--video-duration", type=int, help="Video duration in seconds")
+@click.option("--aspect-ratio", type=click.Choice(["16:9", "9:16", "1:1"]), help="Output aspect ratio")
+def generate_config(
+    idea: str,
+    character1: Path,
+    character2: Path,
+    output: Path,
+    scene_count: int | None,
+    video_duration: int | None,
+    aspect_ratio: str | None,
+):
+    """Generate a workflow configuration file from a creative idea."""
+    from magnific.cli.generate_config import handle_generate_config
+    handle_generate_config(
+        idea=idea,
+        character1=character1,
+        character2=character2,
+        output=output,
+        scene_count=scene_count,
+        video_duration=video_duration,
+        aspect_ratio=aspect_ratio,
+    )
+
+@cli.command()
+@click.option("--config", "-c", required=True, type=Path, help="Workflow config file")
+@click.option("--from-stage", type=click.Choice(["story", "preview", "video"]), help="Resume from stage")
+@click.option("--only-stage", type=click.Choice(["story", "preview", "video"]), help="Run only this stage")
+@click.option("--set", "-s", multiple=True, help="Override config value (key.path=value)")
+def run(
+    config: Path,
+    from_stage: str | None,
+    only_stage: str | None,
+    set: tuple[str, ...],
+):
+    """Run the Magnific pipeline."""
+    from magnific.cli.run import handle_run
+    handle_run(
+        config=config,
+        from_stage=from_stage,
+        only_stage=only_stage,
+        overrides=set,
+    )
+
+@cli.command()
+@click.option("--job-id", type=str, help="Job ID to inspect")
+@click.option("--recent", type=int, help="Show N most recent jobs")
+def status(job_id: str | None, recent: int | None):
+    """Check job status."""
+    from magnific.cli.status import handle_status
+    handle_status(job_id=job_id, recent=recent)
+```
+
+---
+
+# STEP 9: TESTING STRATEGY
+
+## Test Categories
+
+| Category | Scope | Mocking | Example |
+|----------|-------|---------|---------|
+| Unit | Single function/class | Internal deps | Config validation, manifest parsing |
+| Stage | Single stage | External APIs | Story parsing, partial failure handling |
+| Integration | Full pipeline | External APIs | End-to-end with mocked providers |
+| Contract | Provider interfaces | None | Abstract method signatures |
+
+## Unit Tests
+
+```python
+# tests/unit/test_config.py
+class TestConfigLoading:
+    def test_load_default_config(self):
+        """Default config loads without errors."""
+        config = load_config()
+        assert config.models.story.name == "gemini-1.5-pro-002"
+    
+    def test_merge_workflow_config(self):
+        """Workflow config overrides defaults correctly."""
+        workflow = {
+            "_inputs": {"idea": "test"},
+            "models": {"story": {"name": "custom-model"}}
+        }
+        config = load_config(overrides=workflow)
+        assert config.models.story.name == "custom-model"
+        # Other values remain default
+        assert config.models.preview.name == "imagen-3.0-generate-002"
+    
+    def test_invalid_temperature_rejected(self):
+        """Temperature outside [0, 2] raises validation error."""
+        with pytest.raises(ValidationError) as exc:
+            PipelineConfig(**{
+                "models": {"story": {"temperature": 3.0}},
+                # ... other required fields
+            })
+        assert "temperature" in str(exc.value)
+    
+    def test_missing_api_key_fails_at_runtime(self):
+        """Config validation passes, but execution checks for API key."""
+        config = load_config()
+        # No GOOGLE_API_KEY set
+        with pytest.raises(MissingApiKeyError):
+            validate_api_key(config)
+
+# tests/unit/test_manifest.py
+class TestManifestSerialization:
+    def test_story_manifest_roundtrip(self, sample_story_manifest):
+        """Manifest survives JSON serialization."""
+        json_str = sample_story_manifest.to_json()
+        parsed = StoryManifest.from_json(json_str)
+        assert parsed == sample_story_manifest
+    
+    def test_manifest_with_failed_scene(self):
+        """Failed scenes have error messages."""
+        manifest = StoryManifest(
+            job_id="test",
+            scenes=[
+                SceneManifest(scene_id="s1", status="success"),
+                SceneManifest(scene_id="s2", status="failed", error="blocked"),
+            ]
+        )
+        assert manifest.scenes[1].error == "blocked"
+    
+    def test_partial_status_detection(self):
+        """Manifest with mix of success/failed is 'partial'."""
+        manifest = PreviewManifest(
+            job_id="test",
+            scenes=[
+                PreviewSceneManifest(scene_id="s1", status="success"),
+                PreviewSceneManifest(scene_id="s2", status="failed"),
+            ]
+        )
+        assert manifest.computed_status == "partial"
+
+# tests/unit/test_retry.py
+class TestRetryLogic:
+    async def test_success_on_first_try(self):
+        """No retry needed if function succeeds."""
+        call_count = 0
+        async def fn():
+            nonlocal call_count
+            call_count += 1
+            return "ok"
+        
+        result = await with_retry(fn, default_retry_config, always_retryable)
+        assert result == "ok"
+        assert call_count == 1
+    
+    async def test_retry_then_success(self):
+        """Retries transient errors until success."""
+        call_count = 0
+        async def fn():
+            nonlocal call_count
+            call_count += 1
+            if call_count < 3:
+                raise RateLimitError("429")
+            return "ok"
+        
+        result = await with_retry(fn, default_retry_config, classify_error)
+        assert result == "ok"
+        assert call_count == 3
+    
+    async def test_exhaustion_raises(self):
+        """Raises RetryExhaustedError after max attempts."""
+        async def fn():
+            raise RateLimitError("429")
+        
+        with pytest.raises(RetryExhaustedError) as exc:
+            await with_retry(fn, default_retry_config, classify_error)
+        assert exc.value.attempts == 3
+    
+    async def test_permanent_error_no_retry(self):
+        """Permanent errors are not retried."""
+        call_count = 0
+        async def fn():
+            nonlocal call_count
+            call_count += 1
+            raise SafetyFilterError("blocked")
+        
+        with pytest.raises(SafetyFilterError):
+            await with_retry(fn, default_retry_config, classify_error)
+        assert call_count == 1  # No retry
+```
+
+## Stage Tests
+
+```python
+# tests/stages/test_preview.py
+class TestPreviewStage:
+    @pytest.fixture
+    def mock_imagen(self):
+        return Mock(spec=ImageGenerator)
+    
+    @pytest.fixture
+    def story_manifest(self) -> StoryManifest:
+        return StoryManifest(
+            job_id="test-job",
+            scenes=[
+                SceneManifest(
+                    scene_id="scene_001",
+                    title="Scene 1",
+                    image_prompt="prompt 1",
+                    video_prompt="video prompt 1",
+                    duration_seconds=5,
+                ),
+                SceneManifest(
+                    scene_id="scene_002",
+                    title="Scene 2",
+                    image_prompt="prompt 2",
+                    video_prompt="video prompt 2",
+                    duration_seconds=5,
+                ),
+            ]
+        )
+    
+    async def test_successful_generation(
+        self,
+        mock_imagen: Mock,
+        story_manifest: StoryManifest,
+        tmp_path: Path,
+    ):
+        """All scenes generate successfully."""
+        mock_imagen.generate.side_effect = [
+            ImageResult(success=True, path="previews/scene_001.png"),
+            ImageResult(success=True, path="previews/scene_002.png"),
+        ]
+        
+        stage = PreviewStage(config=default_config, job=mock_job(tmp_path))
+        stage.provider = mock_imagen
+        
+        result = await stage.execute(story_manifest)
+        
+        assert result.status == "complete"
+        assert all(s.status == "success" for s in result.scenes)
+        assert mock_imagen.generate.call_count == 2
+    
+    async def test_partial_failure(
+        self,
+        mock_imagen: Mock,
+        story_manifest: StoryManifest,
+        tmp_path: Path,
+    ):
+        """One scene fails, others succeed."""
+        mock_imagen.generate.side_effect = [
+            ImageResult(success=True, path="previews/scene_001.png"),
+            SafetyFilterError("Content policy violation"),
+        ]
+        
+        stage = PreviewStage(config=default_config, job=mock_job(tmp_path))
+        stage.provider = mock_imagen
+        
+        result = await stage.execute(story_manifest)
+        
+        assert result.status == "partial"
+        assert result.scenes[0].status == "success"
+        assert result.scenes[1].status == "failed"
+        assert "policy" in result.scenes[1].error
+    
+    async def test_concurrency_respected(
+        self,
+        mock_imagen: Mock,
+        story_manifest_with_6_scenes: StoryManifest,
+        tmp_path: Path,
+    ):
+        """Max concurrent requests is respected."""
+        max_concurrent = 2
+        config = default_config_with(max_concurrent=max_concurrent)
+        
+        # Make generate() slow to detect concurrent calls
+        async def slow_generate(*args, **kwargs):
+            await asyncio.sleep(0.1)
+            return ImageResult(success=True, path="preview.png")
+        
+        mock_imagen.generate.side_effect = slow_generate
+        
+        stage = PreviewStage(config=config, job=mock_job(tmp_path))
+        stage.provider = mock_imagen
+        
+        await stage.execute(story_manifest_with_6_scenes)
+        
+        # With 6 scenes and max 2 concurrent, should take ~0.3s (3 batches)
+        # If all ran at once, would take ~0.1s
+        # This is hard to test precisely, but we can verify the semaphore was used
+```
+
+## Video Stage Tests (Async Polling)
+
+```python
+# tests/stages/test_video.py
+class TestVideoStage:
+    async def test_concurrent_polling(self, mock_veo, preview_manifest, tmp_path):
+        """Videos poll concurrently, not sequentially."""
+        # 3 scenes, each takes 1s to complete
+        # Sequential: 3s total
+        # Concurrent: ~1s total
+        
+        async def slow_poll(*args, **kwargs):
+            await asyncio.sleep(1.0)
+            return VideoResult(success=True, path="video.mp4")
+        
+        mock_veo.poll.side_effect = slow_poll
+        
+        stage = VideoStage(config=default_config, job=mock_job(tmp_path))
+        stage.provider = mock_veo
+        
+        start = time.monotonic()
+        await stage.execute(preview_manifest)
+        elapsed = time.monotonic() - start
+        
+        # Should be close to 1s, not 3s
+        assert elapsed < 1.5, f"Polling not concurrent: took {elapsed}s"
+    
+    async def test_video_timeout(self, mock_veo, preview_manifest, tmp_path):
+        """Stuck video times out after max poll attempts."""
+        mock_veo.poll.return_value = VideoResult(
+            success=False,
+            status="processing",
+            error=None,
+        )
+        
+        config = default_config_with(poll_max_attempts=3, poll_interval=0.1)
+        stage = VideoStage(config=config, job=mock_job(tmp_path))
+        stage.provider = mock_veo
+        
+        result = await stage.execute(preview_manifest)
+        
+        assert result.scenes[0].status == "failed"
+        assert "timeout" in result.scenes[0].error.lower()
+    
+    async def test_submit_rate_limiting(self, mock_veo, preview_manifest, tmp_path):
+        """Submissions respect rate limit timing."""
+        call_times = []
+        
+        async def track_submit(*args, **kwargs):
+            call_times.append(time.monotonic())
+            return "op-123"
+        
+        mock_veo.submit.side_effect = track_submit
+        mock_veo.poll.return_value = VideoResult(success=True, path="video.mp4")
+        
+        config = default_config_with(calls_per_minute=60)  # 1 per second
+        stage = VideoStage(config=config, job=mock_job(tmp_path))
+        stage.provider = mock_veo
+        
+        await stage.execute(preview_manifest)
+        
+        # Check gaps between calls
+        for i in range(1, len(call_times)):
+            gap = call_times[i] - call_times[i-1]
+            assert gap >= 0.9, f"Rate limit violated: {gap}s between calls"
+```
+
+## Integration Test
+
+```python
+# tests/integration/test_orchestrator.py
+class TestOrchestratorIntegration:
+    async def test_full_pipeline_success(
+        self,
+        mock_providers,
+        sample_workflow_config,
+        tmp_path,
+    ):
+        """Full pipeline runs successfully with mocked providers."""
+        # Setup mocks
+        mock_providers.story.generate_scenes.return_value = [
+            SceneData(scene_id="s1", title="Scene 1", ...),
+            SceneData(scene_id="s2", title="Scene 2", ...),
+        ]
+        mock_providers.image.generate.return_value = ImageResult(success=True, path="preview.png")
+        mock_providers.video.submit.return_value = "op-123"
+        mock_providers.video.poll.return_value = VideoResult(success=True, path="video.mp4")
+        
+        # Run pipeline
+        job = Job.create(tmp_path / "jobs", sample_workflow_config)
+        orchestrator = Orchestrator(config=sample_workflow_config, job=job)
+        result = await orchestrator.run()
+        
+        assert result.status == "complete"
+        assert result.stage_progress == {"story": "complete", "preview": "complete", "video": "complete"}
+    
+    async def test_resume_from_preview(
+        self,
+        mock_providers,
+        sample_workflow_config,
+        tmp_path,
+        existing_story_manifest,
+    ):
+        """Resuming from preview uses existing story manifest."""
+        # Create job with existing story manifest
+        job = Job.load(tmp_path / "jobs" / "existing-job")
+        
+        orchestrator = Orchestrator(config=sample_workflow_config, job=job)
+        await orchestrator.run(from_stage="preview")
+        
+        # Story generation should NOT have been called
+        mock_providers.story.generate_scenes.assert_not_called()
+        # Preview should have been called
+        mock_providers.image.generate.assert_called()
+```
+
+---
+
+# STEP 10: SELF-CRITIQUE
+
+## Weak Points Identified
+
+| Weakness | Impact | Mitigation |
+|----------|--------|------------|
+| Character consistency is best-effort | Output quality may vary | Document limitation; reference images are the best available mechanism |
+| No persistent database | Limited querying across jobs | Acceptable for v1; add SQLite in v2 |
+| JSON manifests can get large | Disk I/O for many scenes | Unlikely to be problem with <20 scenes |
+| No progress UI | Poor UX for long jobs | Could add tqdm in future |
+| Single-machine only | Can't scale horizontally | Acceptable for v1; queue system for v2 |
+
+## Over-Engineering Risks
+
+| Potential Over-Engine | Assessment | Decision |
+|-----------------------|------------|----------|
+| Provider abstraction | Low risk | Small interface, high value if swapping |
+| Pydantic config | Low risk | Validation is critical; Pydantic is standard |
+| Full async | Medium risk | Adds complexity but necessary for video polling |
+| Separate CLI layer | Low risk | Clean separation, easy to test |
+
+## Scalability Limitations
+
+1. **Job count**: Filesystem-based state doesn't scale past ~1000 jobs
+2. **Scene count**: No batching for very high scene counts (50+)
+3. **Image size**: No preprocessing for very large reference images
+4. **Concurrent jobs**: No coordination between parallel job runs
+
+## What I'd Improve With More Time
+
+1. **SQLite job store**: Replace `job_status.json` lookups with proper queries
+2. **Progress bars**: Integrate `tqdm` for per-scene progress
+3. **Character validation**: Compare generated images to references using embedding similarity
+4. **Human-in-the-loop**: Preview review step before video generation
+5. **Prompt optimization**: A/B test different prompt strategies for character consistency
+6. **Web UI**: FastAPI + HTMX for non-technical users
+7. **Cost tracking**: Token/usage logging per job
+8. **Image preprocessing**: Auto-resize/compress reference images to optimal size
+
+## Design Decision Revisions
+
+After self-critique, I'm adjusting:
+
+1. **Originally**: Considered SQLite from start
+   **Revised**: Start with JSON manifests, add SQLite as optional backend later. YAGNI for v1.
+
+2. **Originally**: Complex scene dependency graph
+   **Revised**: Linear scene order is sufficient. Dependencies add complexity without clear value.
+
+3. **Originally**: Separate config for each stage
+   **Revised**: Single config file with namespaced sections. Simpler to manage.
+
+---
+
+# STEP 11: IMPLEMENTATION PLAN
+
+## Phase 1: Foundation (Day 1)
+
+```
+1.1 Initialize project structure
+    - pyproject.toml with dependencies
+    - Directory structure
+    - .gitignore
+    
+1.2 Implement config module
+    - config/models.py (all Pydantic models)
+    - config/loader.py (load, merge, validate)
+    - Default config file
+    
+1.3 Implement core module
+    - core/errors.py (exception hierarchy)
+    - core/job.py (Job class, directory management)
+    - core/manifest.py (all manifest models)
+    - core/retry.py (retry handler)
+    - core/rate_limiter.py (rate limiting)
+    
+1.4 Write foundation tests
+    - test_config.py
+    - test_manifest.py
+    - test_retry.py
+    - test_job.py
+```
+
+## Phase 2: Provider Interfaces (Day 2)
+
+```
+2.1 Define abstract interfaces
+    - providers/base.py (all abstract classes)
+    
+2.2 Implement Google client setup
+    - providers/google/client.py (shared auth, client creation)
+    
+2.3 Implement Gemini provider
+    - providers/google/gemini.py
+    - Multimodal prompt construction
+    - JSON response parsing
+    
+2.4 Implement Imagen provider
+    - providers/google/imagen.py
+    - Reference image handling
+    - Image download
+    
+2.5 Implement Veo provider
+    - providers/google/veo.py
+    - Submit operation
+    - Poll with backoff
+    - Video download
+    
+2.6 Write provider tests (all mocked)
+```
+
+## Phase 3: Stages (Day 3)
+
+```
+3.1 Implement BaseStage
+    - stages/base.py
+    - Common orchestration logic
+    - Manifest writing
+    
+3.2 Implement StoryStage
+    - stages/story.py
+    - Prompt template rendering
+    - Response validation
+    
+3.3 Implement PreviewStage
+    - stages/preview.py
+    - Concurrent execution with semaphore
+    - Partial failure handling
+    
+3.4 Implement VideoStage
+    - stages/video.py
+    - Async submit phase
+    - Concurrent poll phase
+    - Timeout handling
+    
+3.5 Write stage tests
+    - test_story.py
+    - test_preview.py
+    - test_video.py
+```
+
+## Phase 4: Orchestration (Day 4)
+
+```
+4.1 Implement Orchestrator
+    - orchestrator.py
+    - Stage registry
+    - Resume logic
+    - Job status updates
+    
+4.2 Integration tests
+    - Full pipeline with mocks
+    - Resume scenarios
+    - Partial failure scenarios
+```
+
+## Phase 5: CLI & Polish (Day 5)
+
+```
+5.1 Implement CLI
+    - cli/app.py (Click setup)
+    - cli/generate_config.py
+    - cli/run.py
+    - cli/status.py
+    
+5.2 Write documentation
+    - README.md
+    - ARCHITECTURE.md
+    - CHANGELOG.md
+    
+5.3 Final review
+    - Type checking (mypy)
+    - Linting (ruff)
+    - Edge case testing
+```
+
+## Key Type Signatures
+
+```python
+# core/job.py
+class Job:
+    id: UUID
+    base_dir: Path
+    config: PipelineConfig
+    
+    @classmethod
+    def create(cls, base_dir: Path, config: PipelineConfig) -> Job: ...
+    
+    @classmethod
+    def load(cls, job_dir: Path) -> Job: ...
+    
+    def stage_dir(self, stage: str) -> Path: ...
+    
+    def load_manifest(self, stage: str) -> BaseManifest | None: ...
+    
+    def write_manifest(self, stage: str, manifest: BaseManifest) -> None: ...
+    
+    def update_status(self, status: JobStatus) -> None: ...
+
+# core/manifest.py
+class SceneManifest(BaseModel):
+    scene_id: str
+    scene_number: int
+    title: str
+    image_prompt: str
+    video_prompt: str
+    duration_seconds: int
+    status: Literal["pending", "success", "failed"] = "pending"
+    output_path: str | None = None
+    error: str | None = None
+
+class StoryManifest(BaseModel):
+    job_id: str
+    stage: Literal["story"] = "story"
+    status: Literal["pending", "partial", "complete", "failed"]
+    created_at: datetime
+    input_summary: InputSummary
+    scenes: list[SceneManifest]
+    
+    def to_json(self) -> str: ...
+    
+    @classmethod
+    def from_json(cls, data: str) -> StoryManifest: ...
+
+# stages/base.py
+class BaseStage(ABC):
+    def __init__(self, config: PipelineConfig, job: Job) -> None: ...
+    
+    @abstractmethod
+    async def execute(self, input_manifest: BaseManifest | None) -> BaseManifest: ...
+    
+    def should_run(self, input_manifest: BaseManifest | None) -> bool: ...
+    
+    def get_scenes_to_process(
+        self,
+        manifest: BaseManifest,
+        output_field: str,
+    ) -> list[SceneManifest]: ...
+
+# orchestrator.py
+class Orchestrator:
+    def __init__(self, config: PipelineConfig, job: Job) -> None: ...
+    
+    async def run(
+        self,
+        from_stage: str | None = None,
+        only_stage: str | None = None,
+    ) -> JobResult: ...
+    
+    async def run_stage(
+        self,
+        stage_name: str,
+        input_manifest: BaseManifest | None,
+    ) -> BaseManifest: ...
+
+# providers/base.py
+class StoryGenerator(ABC):
+    @abstractmethod
+    async def generate_scenes(
+        self,
+        reference_images: list[Path],
+        brief: str,
+        config: StoryModelConfig,
+        prompt_config: StoryPromptConfig,
+    ) -> list[SceneData]: ...
+
+class ImageGenerator(ABC):
+    @abstractmethod
+    async def generate(
+        self,
+        prompt: str,
+        reference_images: list[Path],
+        output_path: Path,
+        config: PreviewModelConfig,
+    ) -> ImageResult: ...
+
+class VideoGenerator(ABC):
+    @abstractmethod
+    async def submit(
+        self,
+        prompt: str,
+        reference_image: Path,
+        config: VideoModelConfig,
+    ) -> str: ...
+    
+    @abstractmethod
+    async def poll(
+        self,
+        operation_id: str,
+        output_path: Path,
+        config: VideoModelConfig,
+        poll_config: PollConfig,
+    ) -> VideoResult: ...
+```
+
+---
+
+# Summary of Key Design Decisions
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Language | Python 3.11+ | Google SDK, async support, type hints |
+| Async model | Full asyncio | Video polling demands async; consistent model |
+| Config format | YAML | Human-readable, comments, standard |
+| Config validation | Pydantic v2 | Industry standard, performant |
+| Manifest format | JSON | Universal tooling, no comments needed |
+| State storage | Filesystem | Simple, debuggable, no DB dependency |
+| Job ID | UUID v4 | Unique, no coordination needed |
+| CLI framework | Click | Mature, type hints, good docs |
+| Testing | pytest + mocks | Standard, clear, no real API calls |
+| Retry | Exponential backoff + jitter | Industry standard, avoids thundering herd |
+| Rate limiting | Token bucket | Smooth request distribution |
+| Provider abstraction | ABC classes | Simple, explicit, testable |
+
+---
+
+This design is ready for implementation. The next step is to write the actual code following this architecture.

@@ -1,0 +1,82 @@
+{
+  "job_id": "1921ed79-8aa4-4817-b8b8-ebb2671f9976",
+  "stage": "video",
+  "created_at": "2026-05-04T12:28:49.799994",
+  "updated_at": "2026-05-04T12:28:49.800001",
+  "metadata": {
+    "model": "veo-3.0-generate-001",
+    "duration_seconds": 8,
+    "total_scenes": 6,
+    "successful": 6,
+    "failed": 0
+  },
+  "parent_manifest": "preview_manifest.json",
+  "scenes": [
+    {
+      "scene_id": "scene_001",
+      "scene_number": 1,
+      "title": "The Forest Path",
+      "preview_path": "/Users/mkazi/Magnific Task/jobs/1921ed79-8aa4-4817-b8b8-ebb2671f9976/previews/scene_001.png",
+      "video_path": "/Users/mkazi/Magnific Task/jobs/1921ed79-8aa4-4817-b8b8-ebb2671f9976/videos/scene_001.mp4",
+      "video_duration_sec": 8.0,
+      "operation_id": "e592351d-cba0-49b1-ab57-1c50fb69a666",
+      "status": "success",
+      "error": null
+    },
+    {
+      "scene_id": "scene_002",
+      "scene_number": 2,
+      "title": "A Curious Sound",
+      "preview_path": "/Users/mkazi/Magnific Task/jobs/1921ed79-8aa4-4817-b8b8-ebb2671f9976/previews/scene_002.png",
+      "video_path": "/Users/mkazi/Magnific Task/jobs/1921ed79-8aa4-4817-b8b8-ebb2671f9976/videos/scene_002.mp4",
+      "video_duration_sec": 8.0,
+      "operation_id": "3b36b4ba-cb7b-411b-a141-1eb9d372c328",
+      "status": "success",
+      "error": null
+    },
+    {
+      "scene_id": "scene_003",
+      "scene_number": 3,
+      "title": "The Discovery",
+      "preview_path": "/Users/mkazi/Magnific Task/jobs/1921ed79-8aa4-4817-b8b8-ebb2671f9976/previews/scene_003.png",
+      "video_path": "/Users/mkazi/Magnific Task/jobs/1921ed79-8aa4-4817-b8b8-ebb2671f9976/videos/scene_003.mp4",
+      "video_duration_sec": 8.0,
+      "operation_id": "6cde1004-22d4-46a0-99b7-9caf9c3e569d",
+      "status": "success",
+      "error": null
+    },
+    {
+      "scene_id": "scene_004",
+      "scene_number": 4,
+      "title": "A Gentle Offering",
+      "preview_path": "/Users/mkazi/Magnific Task/jobs/1921ed79-8aa4-4817-b8b8-ebb2671f9976/previews/scene_004.png",
+      "video_path": "/Users/mkazi/Magnific Task/jobs/1921ed79-8aa4-4817-b8b8-ebb2671f9976/videos/scene_004.mp4",
+      "video_duration_sec": 8.0,
+      "operation_id": "7b1b1b52-47f6-493d-b049-183b12a0eb1d",
+      "status": "success",
+      "error": null
+    },
+    {
+      "scene_id": "scene_005",
+      "scene_number": 5,
+      "title": "The Icebreaker",
+      "preview_path": "/Users/mkazi/Magnific Task/jobs/1921ed79-8aa4-4817-b8b8-ebb2671f9976/previews/scene_005.png",
+      "video_path": "/Users/mkazi/Magnific Task/jobs/1921ed79-8aa4-4817-b8b8-ebb2671f9976/videos/scene_005.mp4",
+      "video_duration_sec": 8.0,
+      "operation_id": "64931417-5d31-4da5-bd73-574abb28cede",
+      "status": "success",
+      "error": null
+    },
+    {
+      "scene_id": "scene_006",
+      "scene_number": 6,
+      "title": "The New Pack",
+      "preview_path": "/Users/mkazi/Magnific Task/jobs/1921ed79-8aa4-4817-b8b8-ebb2671f9976/previews/scene_006.png",
+      "video_path": "/Users/mkazi/Magnific Task/jobs/1921ed79-8aa4-4817-b8b8-ebb2671f9976/videos/scene_006.mp4",
+      "video_duration_sec": 8.0,
+      "operation_id": "ba8dc26c-e81a-432e-b339-e8ce16112b9c",
+      "status": "success",
+      "error": null
+    }
+  ]
+}

@@ -1,0 +1,92 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "magnific"
+version = "1.0.0"
+description = "Creative automation pipeline: character references + idea → animated video clips"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [{ name = "Magnific Team" }]
+keywords = ["ai", "video-generation", "gemini", "veo", "imagen", "pipeline"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    "pydantic>=2.5.0",
+    "pydantic-settings>=2.1.0",
+    "pyyaml>=6.0.1",
+    "click>=8.1.7",
+    "rich>=13.7.0",
+    "tenacity>=8.2.3",
+    "pillow>=10.2.0",
+    "httpx>=0.26.0",
+    "requests>=2.31.0",
+    "aiofiles>=23.2.1",
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+google = [
+    "google-generativeai>=0.3.0",
+    "google-cloud-aiplatform>=1.38.0",
+    "google-api-core>=2.15.0",
+]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.1.0",
+    "mypy>=1.8.0",
+    "ruff>=0.1.0",
+    "types-pyyaml>=6.0.12",
+    "types-pillow>=10.2.0",
+]
+
+[project.scripts]
+magnific = "magnific.cli.app:main"
+
+[project.urls]
+Homepage = "https://github.com/your-org/magnific"
+Documentation = "https://github.com/your-org/magnific#readme"
+Repository = "https://github.com/your-org/magnific"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/magnific"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-v --tb=short --strict-markers"
+markers = [
+    "unit: Unit tests (mocked APIs)",
+    "integration: Integration tests (mocked providers)",
+    "slow: Slow-running tests",
+]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["google.*", "PIL.*"]
+ignore_missing_imports = true
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+select = ["E", "F", "I", "N", "W", "UP", "B", "C4", "SIM", "TCH"]
+ignore = ["E501"]
+
+[tool.ruff.isort]
+known-first-party = ["magnific"]

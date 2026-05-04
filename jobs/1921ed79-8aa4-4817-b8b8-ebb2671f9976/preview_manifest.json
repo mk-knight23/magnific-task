@@ -1,0 +1,82 @@
+{
+  "job_id": "1921ed79-8aa4-4817-b8b8-ebb2671f9976",
+  "stage": "preview",
+  "created_at": "2026-05-04T12:26:57.697957",
+  "updated_at": "2026-05-04T12:26:57.697963",
+  "metadata": {
+    "model": "imagen-4.0-ultra-generate-001",
+    "concurrency": 3,
+    "total_scenes": 6,
+    "successful": 6,
+    "failed": 0
+  },
+  "parent_manifest": "story_manifest.json",
+  "scenes": [
+    {
+      "scene_id": "scene_001",
+      "scene_number": 1,
+      "title": "The Forest Path",
+      "image_prompt": "Cinematic wide shot. A playful, medium-sized brown dog with short, sleek fur and a happy, open mouth is trotting down a sun-dappled forest path. Beside him, a tiny tan and white chihuahua with large ears prances along, full of energy. The forest is lush with tall trees, ferns, and shafts of golden sunlight breaking through the canopy. The style is warm, vibrant, and storybook-like.",
+      "video_prompt": "Slow pan following the two dogs as they move from left to right. Leaves gently float down from the trees.",
+      "preview_path": "/Users/mkazi/Magnific Task/jobs/1921ed79-8aa4-4817-b8b8-ebb2671f9976/previews/scene_001.png",
+      "generation_time_ms": 20903,
+      "status": "success",
+      "error": null
+    },
+    {
+      "scene_id": "scene_002",
+      "scene_number": 2,
+      "title": "A Curious Sound",
+      "image_prompt": "Medium close-up shot. The brown dog has stopped abruptly, his head cocked and ears perked, listening intently to something off-screen. His playful demeanor is gone, replaced by focused curiosity. The tiny chihuahua stands on its hind legs with its front paws on the brown dog's shoulder, looking up at him with a confused expression.",
+      "video_prompt": "A slight, slow zoom in on the brown dog's face, emphasizing his alert eyes and twitching ear.",
+      "preview_path": "/Users/mkazi/Magnific Task/jobs/1921ed79-8aa4-4817-b8b8-ebb2671f9976/previews/scene_002.png",
+      "generation_time_ms": 19766,
+      "status": "success",
+      "error": null
+    },
+    {
+      "scene_id": "scene_003",
+      "scene_number": 3,
+      "title": "The Discovery",
+      "image_prompt": "Low-angle shot from the dogs' point of view. They are peeking through a large, green fern. The main focus is on a tiny, fluffy, grey-striped tabby kitten with huge, luminous blue eyes, huddled and trembling at the base of a massive, moss-covered tree root. The kitten looks lost and scared, dwarfed by its surroundings.",
+      "video_prompt": "A slow rack focus from the out-of-focus fern leaf in the foreground to the sharply focused, scared kitten in the background.",
+      "preview_path": "/Users/mkazi/Magnific Task/jobs/1921ed79-8aa4-4817-b8b8-ebb2671f9976/previews/scene_003.png",
+      "generation_time_ms": 19768,
+      "status": "success",
+      "error": null
+    },
+    {
+      "scene_id": "scene_004",
+      "scene_number": 4,
+      "title": "A Gentle Offering",
+      "image_prompt": "Ground-level shot. The large brown dog is lying down, his head on his paws to make himself look smaller and less threatening. He lets out a soft, gentle whine. The tiny grey tabby kitten, still cautious, takes a tentative step forward, its big blue eyes locked on the gentle dog. The feisty chihuahua watches from a safe distance, peeking from behind the brown dog's back with a look of suspicion.",
+      "video_prompt": "The kitten's tail gives a single, nervous flick. The brown dog blinks slowly and peacefully. The camera is static to build quiet tension.",
+      "preview_path": "/Users/mkazi/Magnific Task/jobs/1921ed79-8aa4-4817-b8b8-ebb2671f9976/previews/scene_004.png",
+      "generation_time_ms": 17406,
+      "status": "success",
+      "error": null
+    },
+    {
+      "scene_id": "scene_005",
+      "scene_number": 5,
+      "title": "The Icebreaker",
+      "image_prompt": "A warm, intimate close-up. The chihuahua has decided to help, nudging a single, crisp autumn leaf with his nose towards the kitten. The kitten, no longer scared, has a front paw raised mid-air, ready to playfully bat at the leaf. The moment is one of budding friendship and gentle curiosity. The brown dog's nose is visible in the soft-focus background, watching peacefully.",
+      "video_prompt": "The kitten's paw quickly bats down at the leaf, causing it to skitter slightly. The chihuahua gives a happy, silent yip.",
+      "preview_path": "/Users/mkazi/Magnific Task/jobs/1921ed79-8aa4-4817-b8b8-ebb2671f9976/previews/scene_005.png",
+      "generation_time_ms": 19346,
+      "status": "success",
+      "error": null
+    },
+    {
+      "scene_id": "scene_006",
+      "scene_number": 6,
+      "title": "The New Pack",
+      "image_prompt": "Epic, heartwarming wide shot. The three animals are now traveling together. The tiny grey tabby kitten is riding comfortably on the broad back of the brown dog, looking ahead with wide-eyed wonder. The brown dog walks with a steady, proud gait. Beside them, the tiny tan chihuahua trots with his chest puffed out, like a tiny but determined guard. They are walking along a ridge overlooking a misty valley at sunset.",
+      "video_prompt": "A smooth, cinematic tracking shot follows the trio as they walk across the screen. A gentle breeze ruffles the kitten's fur.",
+      "preview_path": "/Users/mkazi/Magnific Task/jobs/1921ed79-8aa4-4817-b8b8-ebb2671f9976/previews/scene_006.png",
+      "generation_time_ms": 16761,
+      "status": "success",
+      "error": null
+    }
+  ]
+}

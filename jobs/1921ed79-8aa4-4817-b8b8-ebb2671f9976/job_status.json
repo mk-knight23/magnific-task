@@ -1,0 +1,18 @@
+{
+  "job_id": "1921ed79-8aa4-4817-b8b8-ebb2671f9976",
+  "stage": "status",
+  "created_at": "2026-05-04T12:25:44.287861",
+  "updated_at": "2026-05-04T12:28:49.801327",
+  "metadata": {
+    "created_at": "2026-05-04T12:25:44.287505"
+  },
+  "status": "complete",
+  "current_stage": null,
+  "stage_progress": {
+    "story": "complete",
+    "preview": "complete",
+    "video": "complete"
+  },
+  "config_hash": null,
+  "error": null
+}

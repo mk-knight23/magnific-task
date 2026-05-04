@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Magnific | Engineering Showcase</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/json.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', 'Liberation Mono', 'Courier New', 'monospace'],
+                    },
+                    colors: {
+                        sky: { 50: '#f0f9ff', 100: '#e0f2fe', 900: '#0c4a6e' },
+                        amber: { 500: '#f59e0b', 600: '#d97706' }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        
+        .glass-card {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.03);
+        }
+        
+        .glass-panel {
+            background: linear-gradient(135deg, rgba(255,255,255,0.9) 0%, rgba(255,255,255,0.6) 100%);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.8);
+            box-shadow: 0 10px 40px rgba(12, 74, 110, 0.05);
+        }
+
+        .fade-in-up {
+            opacity: 0;
+            transform: translateY(30px);
+            transition: opacity 0.8s cubic-bezier(0.16, 1, 0.3, 1), transform 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .fade-in-up.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .bg-mesh {
+            background-color: #f0f9ff;
+            background-image: 
+                radial-gradient(at 40% 20%, hsla(28,100%,74%,0.15) 0px, transparent 50%),
+                radial-gradient(at 80% 0%, hsla(189,100%,56%,0.15) 0px, transparent 50%),
+                radial-gradient(at 0% 50%, hsla(355,100%,93%,0.1) 0px, transparent 50%);
+            background-attachment: fixed;
+        }
+
+        .code-block-wrapper pre {
+            margin: 0;
+            border-radius: 0.75rem;
+            background: #1e1e2e !important;
+        }
+        .code-block-wrapper code {
+            font-family: 'ui-monospace', monospace;
+            font-size: 0.85rem;
+            line-height: 1.6;
+        }
+    </style>
+</head>
+<body class="bg-mesh text-slate-800 antialiased selection:bg-amber-100 selection:text-amber-900">
+
+    <!-- Floating Navbar -->
+    <nav class="fixed w-full z-50 top-6 left-0 px-4 md:px-8">
+        <div class="max-w-7xl mx-auto glass-card rounded-2xl px-6 py-4 flex justify-between items-center transition-all duration-300">
+            <div class="flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+                </svg>
+                <span class="font-bold text-xl tracking-tight text-slate-900">Magnific</span>
+            </div>
+            <div class="hidden lg:flex space-x-8 text-sm font-medium text-slate-600">
+                <a href="#problem" class="hover:text-amber-600 transition-colors">The Problem</a>
+                <a href="#architecture" class="hover:text-amber-600 transition-colors">Architecture</a>
+                <a href="#journey" class="hover:text-amber-600 transition-colors">The Journey</a>
+                <a href="#production" class="hover:text-amber-600 transition-colors">Production Logic</a>
+                <a href="#evolution" class="hover:text-amber-600 transition-colors">Evolution</a>
+            </div>
+            <a href="#output" class="hidden md:inline-flex px-5 py-2.5 rounded-xl bg-slate-900 text-white text-sm font-medium hover:bg-slate-800 transition-colors cursor-pointer shadow-lg shadow-slate-900/20">
+                See Output
+            </a>
+        </div>
+    </nav>
+
+    <!-- 1. HERO -->
+    <section class="min-h-screen flex items-center justify-center pt-32 pb-24 px-6 relative overflow-hidden">
+        <div class="max-w-4xl mx-auto text-center z-10 fade-in-up">
+            <div class="inline-flex items-center gap-2 px-4 py-2 rounded-full glass-card text-sm font-medium text-amber-600 mb-8 border border-amber-200">
+                <span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+                v1.0.0 Production Release
+            </div>
+            <h1 class="text-5xl md:text-7xl font-bold tracking-tight text-slate-900 leading-[1.1] mb-8">
+                From a single idea to a <br/>
+                <span class="text-transparent bg-clip-text bg-gradient-to-r from-sky-600 to-amber-500">full AI storytelling system.</span>
+            </h1>
+            <p class="text-xl md:text-2xl text-slate-600 font-light leading-relaxed mb-12 max-w-2xl mx-auto">
+                Magnific is a robust, production-grade creative automation pipeline. I built it to transform character references and simple concepts into cinematic animated videos.
+            </p>
+            <div class="flex flex-col sm:flex-row items-center justify-center gap-4">
+                <a href="#journey" class="px-8 py-4 rounded-xl bg-slate-900 text-white text-lg font-medium hover:bg-slate-800 transition-colors cursor-pointer shadow-xl shadow-slate-900/10 w-full sm:w-auto">
+                    Explore the Journey
+                </a>
+                <a href="#architecture" class="px-8 py-4 rounded-xl glass-card text-slate-900 text-lg font-medium hover:bg-white/90 transition-colors cursor-pointer w-full sm:w-auto border border-slate-200">
+                    View Architecture
+                </a>
+            </div>
+        </div>
+    </section>
+
+    <!-- 2. THE PROBLEM -->
+    <section id="problem" class="py-32 px-6">
+        <div class="max-w-7xl mx-auto">
+            <div class="grid lg:grid-cols-2 gap-16 items-center">
+                <div class="fade-in-up">
+                    <h2 class="text-sm font-bold tracking-widest text-amber-500 uppercase mb-4">The Challenge</h2>
+                    <h3 class="text-4xl md:text-5xl font-bold text-slate-900 mb-6 leading-tight">Bridging the gap between imagination and reality.</h3>
+                    <p class="text-lg text-slate-600 mb-6 leading-relaxed">
+                        Creative direction is notoriously difficult to automate. When a director says "I want a scene of two friends arguing, then reconciling," a human crew knows what to do. An AI model does not.
+                    </p>
+                    <p class="text-lg text-slate-600 leading-relaxed">
+                        The problem wasn't just generating an image or a video. The problem was <strong>orchestration</strong>. How do we take a raw, messy human idea, enforce structural cinematic constraints, maintain absolute character consistency, and ultimately render temporal motion—all without the system crashing halfway through?
+                    </p>
+                </div>
+                <div class="glass-panel p-10 rounded-3xl fade-in-up">
+                    <div class="space-y-8">
+                        <div class="flex items-start gap-4">
+                            <div class="w-12 h-12 rounded-full bg-sky-100 flex items-center justify-center shrink-0">
+                                <svg class="w-6 h-6 text-sky-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                            </div>
+                            <div>
+                                <h4 class="text-xl font-bold text-slate-900 mb-2">1. The Idea</h4>
+                                <p class="text-slate-600">A loose creative brief and two JPEG reference photos.</p>
+                            </div>
+                        </div>
+                        <div class="w-0.5 h-8 bg-gradient-to-b from-sky-200 to-transparent ml-6"></div>
+                        <div class="flex items-start gap-4">
+                            <div class="w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center shrink-0">
+                                <svg class="w-6 h-6 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                            </div>
+                            <div>
+                                <h4 class="text-xl font-bold text-slate-900 mb-2">2. The Visuals</h4>
+                                <p class="text-slate-600">Transforming text into highly structured, consistent static anchor frames.</p>
+                            </div>
+                        </div>
+                        <div class="w-0.5 h-8 bg-gradient-to-b from-amber-200 to-transparent ml-6"></div>
+                        <div class="flex items-start gap-4">
+                            <div class="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center shrink-0">
+                                <svg class="w-6 h-6 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+                            </div>
+                            <div>
+                                <h4 class="text-xl font-bold text-slate-900 mb-2">3. The Motion</h4>
+                                <p class="text-slate-600">Animating those stills into coherent, cinematic 5-second MP4s.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 3. THE ARCHITECTURE -->
+    <section id="architecture" class="py-32 px-6 bg-white/40">
+        <div class="max-w-6xl mx-auto fade-in-up mb-16">
+            <h2 class="text-sm font-bold tracking-widest text-amber-500 uppercase mb-4 text-center">System Architecture</h2>
+            <h3 class="text-4xl font-bold text-slate-900 mb-6 text-center">Why a pipeline architecture?</h3>
+            <p class="text-lg text-slate-600 leading-relaxed text-center max-w-3xl mx-auto mb-16">
+                I realized early on that asking a single model to do everything would result in generic, hallucinated garbage. The solution was separation of concerns: a multi-stage AI pipeline where each model does exactly one thing perfectly.
+            </p>
+
+            <!-- Architectural Diagram -->
+            <div class="glass-panel p-8 md:p-12 rounded-3xl mb-16 shadow-lg border border-slate-200 overflow-x-auto">
+                <div class="min-w-[800px]">
+                    <div class="flex justify-between items-center mb-12">
+                        <div class="bg-slate-900 text-white px-6 py-3 rounded-xl font-mono text-sm shadow-md">User Input (images + idea)</div>
+                        <div class="h-0.5 bg-slate-300 w-16"></div>
+                        <div class="bg-amber-100 border border-amber-300 text-amber-900 px-6 py-3 rounded-xl font-bold text-sm shadow-sm">Orchestrator</div>
+                        <div class="h-0.5 bg-slate-300 w-16"></div>
+                        <div class="bg-emerald-50 border border-emerald-200 text-emerald-800 px-6 py-3 rounded-xl font-mono text-sm">State & Output (jobs/)</div>
+                    </div>
+
+                    <div class="ml-[340px] border-l-2 border-dashed border-amber-300 pl-12 space-y-10 relative">
+                        <!-- Stage 1 -->
+                        <div class="relative">
+                            <div class="absolute -left-[58px] top-1/2 w-4 h-4 rounded-full bg-amber-400 -translate-y-1/2"></div>
+                            <div class="bg-sky-50 border border-sky-200 p-6 rounded-2xl">
+                                <h4 class="font-bold text-sky-900 mb-2">Stage 1: Story</h4>
+                                <div class="flex gap-4 items-center">
+                                    <span class="px-3 py-1 bg-sky-200 text-sky-800 text-xs rounded-full font-mono">Gemini 1.5</span>
+                                    <span class="text-sm text-slate-500">→ generates <code>story_manifest.json</code></span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Stage 2 -->
+                        <div class="relative">
+                            <div class="absolute -left-[58px] top-1/2 w-4 h-4 rounded-full bg-amber-400 -translate-y-1/2"></div>
+                            <div class="bg-indigo-50 border border-indigo-200 p-6 rounded-2xl">
+                                <h4 class="font-bold text-indigo-900 mb-2">Stage 2: Preview</h4>
+                                <div class="flex gap-4 items-center">
+                                    <span class="px-3 py-1 bg-indigo-200 text-indigo-800 text-xs rounded-full font-mono">Imagen 3.0</span>
+                                    <span class="text-sm text-slate-500">→ generates <code>preview_manifest.json</code></span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Stage 3 -->
+                        <div class="relative">
+                            <div class="absolute -left-[58px] top-1/2 w-4 h-4 rounded-full bg-amber-400 -translate-y-1/2"></div>
+                            <div class="bg-fuchsia-50 border border-fuchsia-200 p-6 rounded-2xl">
+                                <h4 class="font-bold text-fuchsia-900 mb-2">Stage 3: Video</h4>
+                                <div class="flex gap-4 items-center">
+                                    <span class="px-3 py-1 bg-fuchsia-200 text-fuchsia-800 text-xs rounded-full font-mono">Veo</span>
+                                    <span class="text-sm text-slate-500">→ generates <code>video_manifest.json</code></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid md:grid-cols-3 gap-8">
+                <div class="glass-card p-8 rounded-3xl hover:-translate-y-1 transition-transform cursor-pointer">
+                    <h4 class="text-xl font-bold text-slate-900 mb-4">1. Specialization</h4>
+                    <p class="text-slate-600">LLMs are brilliant at narrative structure. Diffusion models are incredible at pixel generation. Video models excel at temporal physics. By chaining them, we get best-in-class results at every step.</p>
+                </div>
+                <div class="glass-card p-8 rounded-3xl hover:-translate-y-1 transition-transform cursor-pointer delay-100">
+                    <h4 class="text-xl font-bold text-slate-900 mb-4">2. Checkpointing</h4>
+                    <p class="text-slate-600">If a 10-minute video render fails at scene 8, losing the previous 7 scenes is unacceptable. A pipeline allows us to write atomic manifests to disk at the boundaries of every stage.</p>
+                </div>
+                <div class="glass-card p-8 rounded-3xl hover:-translate-y-1 transition-transform cursor-pointer delay-200">
+                    <h4 class="text-xl font-bold text-slate-900 mb-4">3. Cost Isolation</h4>
+                    <p class="text-slate-600">Video models are expensive. By forcing the system to generate cheap text and medium-cost images first, we can validate the story before spending real money on video compute.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 4. THE BUILD JOURNEY: DEEP DIVE -->
+    <section id="journey" class="py-32 px-6">
+        <div class="max-w-4xl mx-auto mb-20 text-center fade-in-up">
+            <h2 class="text-sm font-bold tracking-widest text-amber-500 uppercase mb-4">The Build Journey</h2>
+            <h3 class="text-4xl font-bold text-slate-900">Constructing the Engine, Step-by-Step</h3>
+            <p class="text-lg text-slate-600 mt-6">A deep dive into the code and prompts that power each stage of the pipeline.</p>
+        </div>
+
+        <div class="max-w-6xl mx-auto space-y-32">
+            
+            <!-- Step 1: Prompt Engineering -->
+            <div class="fade-in-up">
+                <div class="flex items-center gap-4 mb-8">
+                    <span class="w-12 h-12 rounded-2xl bg-slate-900 text-white flex items-center justify-center font-bold text-xl shadow-lg">01</span>
+                    <h3 class="text-3xl font-bold text-slate-900">Structured Narrative (Gemini)</h3>
+                </div>
+                <div class="grid lg:grid-cols-2 gap-12">
+                    <div>
+                        <p class="text-slate-600 mb-6 text-lg leading-relaxed">
+                            I started by wrangling the LLM. I didn't want prose; I needed data. I designed the <strong>SAEST framework</strong> (Subject, Action, Environment, Style, Technical) to force Gemini to output strictly typed JSON arrays.
+                        </p>
+                        <p class="text-slate-600 mb-6 text-lg leading-relaxed">
+                            By injecting the SAEST framework directly into the system prompt alongside Pydantic schema validation, we completely eliminate hallucinations and formatting errors.
+                        </p>
+                        <ul class="text-sm text-slate-700 space-y-3 bg-white/50 p-6 rounded-2xl border border-slate-200">
+                            <li class="flex items-start gap-3"><svg class="w-5 h-5 text-green-500 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg> <strong>Subject:</strong> Who/what is the focus.</li>
+                            <li class="flex items-start gap-3"><svg class="w-5 h-5 text-green-500 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg> <strong>Action:</strong> What is happening right now.</li>
+                            <li class="flex items-start gap-3"><svg class="w-5 h-5 text-green-500 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg> <strong>Environment:</strong> The setting, lighting, and time of day.</li>
+                            <li class="flex items-start gap-3"><svg class="w-5 h-5 text-green-500 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg> <strong>Style:</strong> The artistic medium (e.g., 3D render, cinematic).</li>
+                            <li class="flex items-start gap-3"><svg class="w-5 h-5 text-green-500 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg> <strong>Technical:</strong> Camera angles, lenses, and framing.</li>
+                        </ul>
+                    </div>
+                    <div class="code-block-wrapper shadow-2xl">
+<pre><code class="language-markdown"># Extracted from: Prompts/Promt.txt
+You are an expert cinematic director and AI prompt engineer.
+Your job is to take a user's creative idea and break it down into a chronological sequence of scenes.
+
+For each scene, you MUST generate an image_prompt using the SAEST framework:
+- Subject: EXACTLY describe the characters to match the reference images.
+- Action: What are they doing?
+- Environment: Setting, lighting, background.
+- Style: Medium (e.g., cinematic photography, 3D render).
+- Technical: Camera angle, shot type (e.g., close-up, wide shot).
+
+Return the response as a strict JSON array of objects.
+Do not wrap the JSON in markdown blocks.</code></pre>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 2: Visual Anchoring -->
+            <div class="fade-in-up">
+                <div class="flex items-center gap-4 mb-8">
+                    <span class="w-12 h-12 rounded-2xl bg-amber-500 text-white flex items-center justify-center font-bold text-xl shadow-lg">02</span>
+                    <h3 class="text-3xl font-bold text-slate-900">Visual Anchoring (Imagen)</h3>
+                </div>
+                <div class="grid lg:grid-cols-2 gap-12">
+                    <div class="order-2 lg:order-1 code-block-wrapper shadow-2xl">
+<pre><code class="language-python"># Extracted from: magnific/core/security.py
+class WorkspaceManager:
+    """Zero-Trust Filesystem Jail to prevent CWE-22"""
+    def __init__(self, job_id: str, base_dir: Path):
+        self.job_id = job_id
+        # Strict absolute resolution
+        self.jail_root = base_dir.joinpath("jobs", job_id).resolve()
+        
+    def resolve(self, path: str | Path) -> Path:
+        """Resolves path and blocks traversal out of the jail."""
+        target = self.jail_root.joinpath(path).resolve()
+        try:
+            # The critical security check
+            target.relative_to(self.jail_root)
+        except ValueError:
+            raise SecurityError(f"Path traversal blocked: {path}")
+            
+        return target</code></pre>
+                    </div>
+                    <div class="order-1 lg:order-2">
+                        <p class="text-slate-600 mb-6 text-lg leading-relaxed">
+                            Video models struggle to keep faces consistent across cuts. By using Google Imagen 3.0 to generate a high-fidelity "anchor frame" for every scene first, we lock in the aesthetics.
+                        </p>
+                        <p class="text-slate-600 mb-6 text-lg leading-relaxed">
+                            Because this stage downloads heavy image files directly to disk, <strong>Security</strong> became paramount. I built the <code>WorkspaceManager</code> to establish a Zero-Trust Filesystem Jail. Every single read/write operation is forced through a path traversal check to prevent CWE-22 vulnerabilities.
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 3: Temporal Motion -->
+            <div class="fade-in-up">
+                <div class="flex items-center gap-4 mb-8">
+                    <span class="w-12 h-12 rounded-2xl bg-sky-600 text-white flex items-center justify-center font-bold text-xl shadow-lg">03</span>
+                    <h3 class="text-3xl font-bold text-slate-900">Temporal Motion (Veo)</h3>
+                </div>
+                <div class="grid lg:grid-cols-2 gap-12">
+                    <div>
+                        <p class="text-slate-600 mb-6 text-lg leading-relaxed">
+                            Finally, I integrated Google Veo. I passed the static anchor images as the initial frame <code>(t=0)</code> alongside the motion prompts. 
+                        </p>
+                        <p class="text-slate-600 mb-6 text-lg leading-relaxed">
+                            Because video generation is a long-running operation (10+ minutes), running this synchronously would lock the entire server. I implemented a native asynchronous polling loop using <code>asyncio.gather()</code>. This means the wall-time of the entire stage is equal to the slowest video, rather than the sum of all videos.
+                        </p>
+                    </div>
+                    <div class="code-block-wrapper shadow-2xl">
+<pre><code class="language-python"># Extracted from: magnific/stages/stage3_video.py
+async def execute(self, job_id: str) -> bool:
+    manifest = self.load_manifest(job_id)
+    operation_ids = []
+    
+    # 1. Dispatch all video jobs to the API concurrently
+    for scene in manifest.scenes:
+        op_id = await self.dispatch_veo_job(scene)
+        operation_ids.append(op_id)
+        
+    # 2. Wait for all jobs to complete simultaneously
+    # Wall time ≈ slowest video (not sum of all videos)
+    tasks = [self.poll_video(op_id) for op_id in operation_ids]
+    results = await asyncio.gather(*tasks)
+    
+    return all(results)</code></pre>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </section>
+
+    <!-- 7. SYSTEM DESIGN & PRODUCTION THINKING -->
+    <section id="production" class="py-32 px-6 bg-slate-900 text-slate-300 relative overflow-hidden">
+        <div class="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom_left,_var(--tw-gradient-stops))] from-slate-800 via-slate-900 to-black opacity-80"></div>
+        
+        <div class="max-w-7xl mx-auto relative z-10">
+            <div class="text-center mb-20 fade-in-up">
+                <h2 class="text-sm font-bold tracking-widest text-amber-500 uppercase mb-4">Engineering Depth</h2>
+                <h3 class="text-4xl font-bold text-white mb-6">Production Hardening</h3>
+                <p class="text-lg text-slate-400 max-w-2xl mx-auto">Connecting APIs is easy. Building a resilient, secure system that doesn't leak money or data is the real engineering challenge. Here is how we enforce QA and Scaling rules.</p>
+            </div>
+
+            <div class="grid lg:grid-cols-2 gap-12">
+                <!-- Ghost Jobs -->
+                <div class="bg-slate-800/50 backdrop-blur-md p-10 rounded-3xl border border-slate-700 fade-in-up">
+                    <div class="w-12 h-12 rounded-2xl bg-emerald-500/20 flex items-center justify-center mb-6 border border-emerald-500/30">
+                        <svg class="w-6 h-6 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+                    </div>
+                    <h4 class="text-2xl font-bold text-white mb-4">Ghost Job Recovery</h4>
+                    <p class="text-slate-400 mb-6 leading-relaxed">If the app crashes during a 10-minute Veo render, cloud resources spin idly. I built an <code>OperationTracker</code> using an append-only JSONL ledger. Upon restart, the system parses the ledger and re-attaches to pending cloud jobs instead of double-billing.</p>
+                    <div class="bg-[#1e1e2e] p-4 rounded-xl font-mono text-xs text-sky-300 border border-slate-700">
+                        {"job_id": "8f3a", "status": "dispatch", "op": "projects/veo/123"}<br/>
+                        {"job_id": "8f3a", "status": "polling", "op": "projects/veo/123"}<br/>
+                        <span class="text-slate-500"># Crash happens here. On reboot, we read the last line and resume polling.</span>
+                    </div>
+                </div>
+
+                <!-- Failure Matrix -->
+                <div class="bg-slate-800/50 backdrop-blur-md p-10 rounded-3xl border border-slate-700 fade-in-up delay-100">
+                    <div class="w-12 h-12 rounded-2xl bg-amber-500/20 flex items-center justify-center mb-6 border border-amber-500/30">
+                        <svg class="w-6 h-6 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                    </div>
+                    <h4 class="text-2xl font-bold text-white mb-4">The Failure Matrix</h4>
+                    <p class="text-slate-400 mb-6 leading-relaxed">Not all errors are equal. The <code>ErrorClassifier</code> distinguishes between transient issues and permanent blocks to save API spend.</p>
+                    
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm text-left border-collapse">
+                            <thead>
+                                <tr class="border-b border-slate-700 text-slate-300">
+                                    <th class="py-3 font-semibold">Scenario</th>
+                                    <th class="py-3 font-semibold">Classification</th>
+                                    <th class="py-3 font-semibold">System Response</th>
+                                </tr>
+                            </thead>
+                            <tbody class="text-slate-400">
+                                <tr class="border-b border-slate-700/50">
+                                    <td class="py-3">Rate limit (429)</td>
+                                    <td><span class="px-2 py-1 bg-sky-900/50 text-sky-400 rounded text-xs">Transient</span></td>
+                                    <td>Exponential Backoff + Retry</td>
+                                </tr>
+                                <tr class="border-b border-slate-700/50">
+                                    <td class="py-3">Safety Filter</td>
+                                    <td><span class="px-2 py-1 bg-red-900/50 text-red-400 rounded text-xs">Permanent</span></td>
+                                    <td>Fail scene gracefully, continue job</td>
+                                </tr>
+                                <tr class="border-b border-slate-700/50">
+                                    <td class="py-3">Path Traversal</td>
+                                    <td><span class="px-2 py-1 bg-purple-900/50 text-purple-400 rounded text-xs">Security</span></td>
+                                    <td>Halt immediately. Raise alarm.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 10. EVOLUTION TIMELINE (CHANGELOG) -->
+    <section id="evolution" class="py-32 px-6">
+        <div class="max-w-4xl mx-auto fade-in-up">
+            <h2 class="text-sm font-bold tracking-widest text-amber-500 uppercase mb-4 text-center">Project History</h2>
+            <h3 class="text-4xl font-bold text-slate-900 mb-16 text-center">The Evolution of Magnific</h3>
+            
+            <div class="relative border-l border-slate-200 ml-4 md:ml-8 space-y-12">
+                
+                <!-- Log 1 -->
+                <div class="relative pl-8 fade-in-up">
+                    <div class="absolute -left-[5px] top-1.5 w-2.5 h-2.5 rounded-full bg-amber-500 shadow-[0_0_0_4px_#f0f9ff]"></div>
+                    <div class="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+                        <div class="flex justify-between items-center mb-2">
+                            <h4 class="text-lg font-bold text-slate-900">Security-First Architecture</h4>
+                            <span class="text-xs font-mono text-slate-400">v1.0.0</span>
+                        </div>
+                        <p class="text-slate-600 text-sm leading-relaxed">
+                            Implemented `WorkspaceManager` to enforce path traversal protection (CWE-22) and symlink escape detection. Decision: Security must be enforced at the lowest level, not sprinkled throughout.
+                        </p>
+                    </div>
+                </div>
+
+                <!-- Log 2 -->
+                <div class="relative pl-8 fade-in-up delay-100">
+                    <div class="absolute -left-[5px] top-1.5 w-2.5 h-2.5 rounded-full bg-slate-300 shadow-[0_0_0_4px_#f0f9ff]"></div>
+                    <div class="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+                        <div class="flex justify-between items-center mb-2">
+                            <h4 class="text-lg font-bold text-slate-900">Crash Resilience System</h4>
+                            <span class="text-xs font-mono text-slate-400">v0.9.0</span>
+                        </div>
+                        <p class="text-slate-600 text-sm leading-relaxed">
+                            Added `OperationTracker` for ghost job defense. Introduced atomic manifest writes using `os.replace()` to prevent corruption during power loss.
+                        </p>
+                    </div>
+                </div>
+
+                <!-- Log 3 -->
+                <div class="relative pl-8 fade-in-up delay-200">
+                    <div class="absolute -left-[5px] top-1.5 w-2.5 h-2.5 rounded-full bg-slate-300 shadow-[0_0_0_4px_#f0f9ff]"></div>
+                    <div class="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+                        <div class="flex justify-between items-center mb-2">
+                            <h4 class="text-lg font-bold text-slate-900">Error Classification Matrix</h4>
+                            <span class="text-xs font-mono text-slate-400">v0.5.0</span>
+                        </div>
+                        <p class="text-slate-600 text-sm leading-relaxed">
+                            Separated transient errors from permanent blocks. Retrying safety filters wastes quota; they are now marked as permanent failures, saving significant API spend.
+                        </p>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </section>
+
+    <!-- FINAL OUTPUT -->
+    <section id="output" class="py-24 px-6 bg-slate-50 border-t border-slate-200">
+        <div class="max-w-4xl mx-auto text-center fade-in-up">
+            <h2 class="text-3xl font-bold text-slate-900 mb-8">Ready to see it in action?</h2>
+            <p class="text-lg text-slate-600 mb-10">Run the CLI orchestration tool to generate your first cinematic video pipeline.</p>
+            <div class="bg-slate-900 text-white font-mono text-sm p-4 rounded-xl inline-flex items-center gap-4 shadow-xl">
+                <span class="text-amber-500">$</span>
+                <span>magnific run --config my_idea.yaml</span>
+            </div>
+        </div>
+    </section>
+
+    <!-- 11. FOOTER -->
+    <footer class="py-12 border-t border-slate-200 bg-white">
+        <div class="max-w-7xl mx-auto px-6 flex flex-col md:flex-row items-center justify-between">
+            <div class="flex items-center gap-2 mb-4 md:mb-0">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+                </svg>
+                <span class="font-bold text-slate-900">Magnific Showcase</span>
+            </div>
+            <p class="text-sm text-slate-500">
+                Designed & Engineered for Production.
+            </p>
+        </div>
+    </footer>
+
+    <!-- Scripts -->
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // Syntax Highlighting
+            hljs.highlightAll();
+
+            // Intersection Observer for scroll animations
+            const observerOptions = {
+                root: null,
+                rootMargin: '0px',
+                threshold: 0.15
+            };
+
+            const observer = new IntersectionObserver((entries, observer) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        entry.target.classList.add('visible');
+                        observer.unobserve(entry.target);
+                    }
+                });
+            }, observerOptions);
+
+            document.querySelectorAll('.fade-in-up').forEach((el) => {
+                observer.observe(el);
+            });
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,299 @@
+Magnific Task 
+
+You are a Principal AI Systems Architect, Senior Backend Engineer, and Reliability Engineer combined.
+
+Your task is to design and implement a production-grade system based on the following assignment:
+
+## Technical Interview Assignment — "Magnific" Creative Pipeline
+
+### The Product Idea
+
+**Magnific** is a creative automation tool for artists and storytellers. A user uploads two character reference images and describes a creative idea (e.g., *"a loving couple going through daily life — arguments, chores, reconciliation"*). The system produces a set of short animated video clips featuring those exact characters.
+
+The pipeline conceptually has three stages:
+
+1. **Story & Prompt Generation** — A multimodal LLM (Google Gemini) looks at the reference images, reads the creative brief, and writes a structured list of scene prompts (titles + detailed image-generation prompts).
+2. **Preview Generation** — For each scene prompt, an image-generation model produces a high-quality preview still, keeping character designs consistent with the reference images.
+3. **Video Animation** — Each preview still is fed to a video-generation model (Google Veo) to produce a short cinematic MP4 clip.
+
+Between stages, the system should write **manifest files** (JSON or YAML) so that stages can be run independently, retried, or resumed.
+
+---
+
+### Your Mission
+
+You are the first engineer on this project. There is no existing code, no prior architecture, and no internal libraries. You must take this product idea and turn it into a **working, documented, testable system** published as a public GitHub repository.
+
+You may assume:
+- The evaluator has access to a `GOOGLE_API_KEY` with Gemini and Veo access.
+- Reference images are local files (JPEG/PNG).
+- Output goes to a local directory.
+
+---
+
+### Deliverables
+
+#### 1. Architecture Draft (`ARCHITECTURE.md`)
+Before writing code, document your design decisions:
+- **System overview**: Draw or describe the data flow from user input → final MP4s. Identify every component, its interface, and the data formats it consumes/produces.
+- **Concurrency model**: How do you handle multiple scenes, API rate limits, and concurrent video-generation polling?
+- **Config strategy**: How is the system configured? How do you ensure no hardcoded prompts, paths, or model names live in source files?
+- **Failure handling**: What happens when an API call hits a rate limit, a safety filter blocks a scene, or a JSON schema validation fails?
+- **Extensibility**: If tomorrow we want to add a 4th stage (e.g., audio generation) or swap Veo for another provider, what changes?
+
+#### 2. Working Code (in a public GitHub repo)
+
+Implement the pipeline. The repo must include:
+
+- **`src/` or equivalent** — Clean module structure. If you identify shared logic (config loading, path resolution, retry logic), extract it into a shared module. Do not copy-paste boilerplate across agents.
+- **Config-driven design** — All tunable parameters (model names, prompts, API rate limits, output paths, concurrency settings, retry policies) must live in external YAML/JSON/TOML files. The evaluator should be able to change the model, prompt, or aspect ratio without touching `.py` files.
+- **Typed Python** — Type-hint all public functions and classes. Use `pathlib`, `dataclasses` or `Pydantic`, and modern Python patterns.
+- **CLI entry points**:
+  - `python -m magnific generate-config --idea "..."` (or similar) to create a job configuration
+  - `python -m magnific run --config workflow.yaml` to run the full pipeline
+  - `python -m magnific run --config workflow.yaml --from-stage preview` to resume/skip stages
+  - `python -m magnific status --job-id <UUID>` to inspect a past or running job
+- **Manifest chain** — JSON manifest files between stages so the pipeline is inspectable and resumable.
+- **Job isolation** — Each run gets a unique job ID. Outputs for different jobs never overwrite each other.
+- **Error resilience** — Retry transient API errors with exponential backoff. Handle safety-filter blocks without crashing the whole pipeline. Write partial results.
+- **Tests** — At least one unit test per non-trivial module. Use `pytest`. You may mock the Google APIs; we will not run tests that require real API keys.
+
+#### 3. Documentation
+- **`README.md`** — Setup, dependencies, environment variables, how to run, how to test.
+- **`ARCHITECTURE.md`** — From Part 1.
+- **`CHANGELOG.md`** — Design decisions and trade-offs you made (e.g., why async vs sync, why SQLite vs JSONL, why Pydantic vs dicts).
+- **Developer setup** — `requirements.txt` or `pyproject.toml` with pinned dependencies.
+
+---
+
+### Functional Requirements Checklist
+
+We will evaluate your code against these behaviors:
+
+- [ ] Can generate a valid workflow/config file from a text idea.
+- [ ] Can execute stage 1 (story generation) independently and produce a JSON manifest.
+- [ ] Can execute stage 2 (preview generation) using the stage 1 manifest + reference images, concurrently, with a configurable concurrency cap.
+- [ ] Can execute stage 3 (video animation) using stage 2 manifest, with concurrent polling so wall time ≈ slowest video, not sum of all videos.
+- [ ] Orchestrator can run all three stages end-to-end under a single job ID.
+- [ ] Orchestrator supports resuming from a specific stage.
+- [ ] All output paths, model identifiers, prompts, and runtime parameters are driven by external config.
+- [ ] Graceful handling of API failures (rate limits, safety blocks, network errors).
+- [ ] Partial failure produces usable artifacts and a clear log/manifest of what succeeded and what failed.
+
+---
+
+### Constraints
+
+| Constraint   | Rule                                                       |
+| ------------ | ---------------------------------------------------------- |
+| **Repo**     | Public GitHub repo. Clean commit history.                  |
+
+---
+
+### Evaluation Criteria
+
+| Criterion                                                             | Weight |
+| --------------------------------------------------------------------- | ------ |
+| Architecture clarity & soundness (`ARCHITECTURE.md` + code structure) | 25%    |
+| Code quality (types, naming, DRY, separation of concerns)             | 25%    |
+| Feature completeness against the checklist                            | 25%    |
+| Documentation quality (`README.md`, inline docs, setup ease)          | 15%    |
+| Testing & edge-case handling                                          | 10%    |
+
+---
+
+### Submission
+
+1. Push your work to a **public GitHub repository**.
+2. Send the repository URL and a rough estimate of hours spent.
+3. Include a short note in the repo (or email) describing which design decision you are most proud of and which one you would revisit with more time.
+
+---
+
+Good luck. Show us how you'd build Magnific from scratch.
+
+
+---
+
+⚠️ CRITICAL INSTRUCTIONS
+
+- Do NOT jump to coding immediately.
+- Think step-by-step like a senior engineer building a real system.
+- Your response must be structured, detailed, and production-oriented.
+- Avoid shallow answers.
+- Explicitly justify decisions.
+- Assume this will be evaluated by senior engineers.
+
+---
+
+# STEP 1: PROBLEM UNDERSTANDING
+
+- Restate the problem in your own words
+- Identify implicit requirements and hidden constraints
+- List assumptions (clearly label them)
+- Define success criteria for the system
+
+---
+
+# STEP 2: SYSTEM ARCHITECTURE
+
+Design the full system.
+
+Include:
+
+1. High-level architecture (text diagram)
+2. Components and responsibilities
+3. Data flow from input → final output
+4. Stage-wise breakdown (Stage 1, 2, 3…)
+5. Input/output schema for each stage
+6. Manifest design (structure and purpose)
+7. Job lifecycle and state management
+
+---
+
+# STEP 3: CONCURRENCY & EXECUTION MODEL
+
+Explain:
+
+- Where concurrency is used and why
+- How you handle:
+  - multiple scenes
+  - API rate limits
+  - video generation polling
+- Async vs sync decision (with reasoning)
+
+---
+
+# STEP 4: CONFIGURATION DESIGN
+
+Design a config-driven system.
+
+Include:
+
+- What goes into config vs code
+- Example YAML/JSON config
+- Model selection, prompts, paths, retries, concurrency
+- Environment variables
+- Validation strategy
+
+---
+
+# STEP 5: FAILURE HANDLING & RESILIENCE
+
+List ALL possible failure scenarios:
+
+- API failures (rate limit, timeout, safety filters)
+- Partial pipeline failures
+- Invalid outputs (bad JSON, corrupt images)
+- File system issues
+
+Then define:
+
+- Retry strategy (exponential backoff, limits)
+- Idempotency approach
+- Resume/restart logic using manifests
+- Logging and observability
+
+---
+
+# STEP 6: EXTENSIBILITY DESIGN
+
+Design the system for future growth.
+
+Answer:
+
+- How to add a new stage (e.g., audio generation)?
+- How to swap providers (Gemini → OpenAI, Veo → other)?
+- How to support multiple model providers?
+
+Show:
+
+- Interfaces / abstraction layers
+- Plugin-style architecture if applicable
+
+---
+
+# STEP 7: PROJECT STRUCTURE
+
+Define a clean production-grade repo structure:
+
+- src/ modules
+- shared utilities
+- config management
+- CLI layer
+- tests
+
+Explain why this structure is chosen.
+
+---
+
+# STEP 8: CLI DESIGN
+
+Design CLI commands:
+
+- generate-config
+- run (full pipeline)
+- run from specific stage
+- job status
+
+Include example commands and behavior.
+
+---
+
+# STEP 9: TESTING STRATEGY
+
+Define:
+
+- Unit tests (what to mock)
+- Integration tests
+- Failure simulation
+- Manifest validation tests
+
+---
+
+# STEP 10: SELF-CRITIQUE (VERY IMPORTANT)
+
+Critically review your own design:
+
+- Weak points
+- Over-engineering risks
+- Scalability limitations
+- What would you improve with more time?
+
+Then refine your design.
+
+---
+
+# STEP 11: IMPLEMENTATION PLAN
+
+Now (and only now) provide:
+
+1. Step-by-step implementation plan
+2. Key modules and responsibilities
+3. Important classes/functions (with type hints)
+4. Pseudocode where necessary
+
+Avoid dumping full code unless needed — focus on clarity and structure.
+
+---
+
+# OUTPUT FORMAT
+
+Use clean sections:
+
+- Headings
+- Bullet points
+- Tables where useful
+- Clear separation between design layers
+
+---
+
+# FINAL RULE
+
+Your answer should feel like:
+
+"A senior engineer designed this after deep thinking"
+
+NOT:
+
+"An AI generated a quick answer"

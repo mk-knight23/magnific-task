@@ -1,0 +1,546 @@
+STEP 1: PROBLEM UNDERSTANDING
+Restatement
+Magnific is a 3-stage creative pipeline that transforms character references + a creative brief into animated video clips. The core challenge isn't just calling APIs—it's building a resilient, observable, resumable production system where:
+Each stage produces inspectable artifacts (manifests)
+Failures are contained and recoverable
+The system is configurable without code changes
+Multiple scenes are processed concurrently within API constraints
+Implicit Requirements
+Idempotency: Re-running a stage with the same inputs should be safe
+Observability: We need to know what succeeded/failed without reading logs
+Resource management: API quotas, disk space, concurrent connections
+Character consistency: Stage 2 must maintain character identity across scenes
+Polling efficiency: Video generation is async; we must poll smartly
+Assumptions
+A1: Google API provides standard HTTP status codes for rate limits (429) and safety blocks (400/403)
+A2: Image generation model accepts text prompts + reference image conditioning (implied by "consistent character designs")
+A3: Reference images are reasonable size (<10MB) and valid formats
+A4: Evaluator runs on a machine with Python 3.11+, internet access, and local filesystem
+A5: "Concurrent video-generation polling" means we poll multiple video jobs simultaneously, not that video generation itself is parallelized per scene
+Success Criteria
+End-to-end pipeline runs with single command
+Each stage can run independently
+Failed scenes don't crash the pipeline
+Config changes don't require code changes
+Tests pass without real API keys
+STEP 2: SYSTEM ARCHITECTURE
+High-Level Architecture
+plain
+Copy
+┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
+│   User Input    │────▶│   Config Layer   │────▶│   Job Manager   │
+│ (images + idea) │     │  (YAML/JSON/TOML)│     │  (UUID + dirs)  │
+└─────────────────┘     └──────────────────┘     └────────┬────────┘
+                                                          │
+                              ┌───────────────────────────┼───────────────────────────┐
+                              │                           │                           │
+                              ▼                           ▼                           ▼
+                    ┌─────────────────┐         ┌─────────────────┐         ┌─────────────────┐
+                    │  Stage 1: Story │         │ Stage 2: Preview│         │ Stage 3: Video  │
+                    │   Generation    │         │   Generation    │         │   Generation    │
+                    │                 │         │                 │         │                 │
+                    │  • Gemini Pro   │         │  • Image Model  │         │  • Veo 2        │
+                    │  • JSON schema  │         │  • Concurrent   │         │  • Async poll   │
+                    │  • Validation   │         │  • Rate limit   │         │  • MP4 output   │
+                    └────────┬────────┘         └────────┬────────┘         └────────┬────────┘
+                             │                           │                           │
+                             ▼                           ▼                           ▼
+                    ┌─────────────────┐         ┌─────────────────┐         ┌─────────────────┐
+                    │  manifest_v1    │────────▶│  manifest_v2    │────────▶│  manifest_v3    │
+                    │  (scenes.json)  │         │ (previews.json) │         │  (videos.json)  │
+                    └─────────────────┘         └─────────────────┘         └─────────────────┘
+Components & Responsibilities
+Table
+Component	Responsibility	Interface
+CLI	Parse args, dispatch commands	argparse → function calls
+ConfigManager	Load, validate, merge configs	load(path) -> Config
+JobManager	UUID generation, directory structure, state persistence	create_job() -> JobContext
+StageOrchestrator	Execute stages, handle transitions, resume logic	run_stage(stage_name, manifest_in) -> manifest_out
+StoryAgent	Call Gemini, validate JSON output	generate(config, images, idea) -> SceneList
+PreviewAgent	Call image model, concurrent generation	generate_batch(scenes, refs, config) -> PreviewList
+VideoAgent	Submit to Veo, poll for completion	generate_batch(previews, config) -> VideoList
+RetryPolicy	Exponential backoff, circuit breaker	execute(callable) -> Result
+ManifestIO	Read/write typed manifest files	load/save(path, Model)
+Data Flow
+plain
+Copy
+User Idea + Ref Images
+    │
+    ▼
+[Config Generation] ──► workflow.yaml (job config)
+    │
+    ▼
+[Job Initialization] ──► job_dir/{job_id}/ (isolated workspace)
+    │
+    ▼
+[Stage 1: Story] ──► manifest_01_story.json (list of scenes with prompts)
+    │
+    ▼
+[Stage 2: Preview] ──► manifest_02_preview.json (list of scenes with image paths)
+    │
+    ▼
+[Stage 3: Video] ──► manifest_03_video.json (list of scenes with video paths)
+    │
+    ▼
+[Final Output] ──► job_dir/{job_id}/output/ (MP4s + final manifest)
+Stage I/O Schemas
+Stage 1 Output (Story Manifest)
+JSON
+Copy
+{
+  "job_id": "uuid",
+  "stage": "story",
+  "created_at": "ISO8601",
+  "source": {
+    "idea": "string",
+    "reference_images": ["path1", "path2"]
+  },
+  "scenes": [
+    {
+      "scene_id": "scene_001",
+      "title": "Morning Coffee",
+      "prompt": "Detailed image generation prompt...",
+      "order": 1,
+      "status": "pending"
+    }
+  ],
+  "metadata": {
+    "model": "gemini-2.5-pro",
+    "total_scenes": 5
+  }
+}
+Stage 2 Output (Preview Manifest)
+JSON
+Copy
+{
+  "job_id": "uuid",
+  "stage": "preview",
+  "parent_manifest": "manifest_01_story.json",
+  "scenes": [
+    {
+      "scene_id": "scene_001",
+      "title": "Morning Coffee",
+      "prompt": "...",
+      "preview_image": "path/to/preview_001.png",
+      "generation_time_ms": 4200,
+      "status": "completed"
+    }
+  ]
+}
+Stage 3 Output (Video Manifest)
+JSON
+Copy
+{
+  "job_id": "uuid",
+  "stage": "video",
+  "parent_manifest": "manifest_02_preview.json",
+  "scenes": [
+    {
+      "scene_id": "scene_001",
+      "title": "Morning Coffee",
+      "preview_image": "...",
+      "video_path": "path/to/video_001.mp4",
+      "video_duration_sec": 5.0,
+      "status": "completed"
+    }
+  ]
+}
+Job Lifecycle & State Management
+Jobs are directories, not database records. State is derived from manifest files:
+plain
+Copy
+job_dir/
+├── config.yaml              # Copy of workflow config
+├── manifest_01_story.json   # Stage 1 output
+├── manifest_02_preview.json # Stage 2 output
+├── manifest_03_video.json   # Stage 3 output
+├── logs/
+│   └── pipeline.log
+└── output/                  # Final artifacts
+    ├── scene_001/
+    │   ├── preview.png
+    │   └── video.mp4
+    └── ...
+State inference: Check which manifests exist to determine current stage. No separate state file needed—manifests are the source of truth.
+STEP 3: CONCURRENCY & EXECUTION MODEL
+Where Concurrency Is Used
+Table
+Location	Model	Rationale
+Stage 2 (Preview)	ThreadPool	Image generation is I/O-bound (HTTP API calls). Threads are sufficient; async adds complexity without benefit since we're using blocking SDKs
+Stage 3 (Video)	Asyncio + ThreadPool	Video generation requires polling. We submit all videos, then poll all concurrently. Asyncio for polling loops, threads for blocking API calls
+Why Not Full Async?
+Decision: Hybrid model (sync for simple calls, async for polling).
+Rationale:
+Google GenAI SDK is primarily synchronous
+Converting everything to async adds complexity for marginal gain
+ThreadPoolExecutor handles concurrent I/O-bound image generation well
+Asyncio shines for managing hundreds of polling coroutines with asyncio.gather
+Rate Limiting Strategy
+Python
+Copy
+# Token bucket per provider
+class RateLimiter:
+    def __init__(self, requests_per_minute: int):
+        self.tokens = requests_per_minute
+        self.last_refill = time.monotonic()
+        self.lock = threading.Lock()
+    
+    def acquire(self):
+        with self.lock:
+            self._refill()
+            if self.tokens >= 1:
+                self.tokens -= 1
+                return True
+            return False
+One limiter per API provider (Gemini, Image, Veo)
+Configurable RPM from config file
+Blocking wait with timeout rather than immediate failure
+Video Polling Architecture
+plain
+Copy
+Submit all videos ──► Get operation IDs
+    │
+    ▼
+┌─────────────────────────────────────────┐
+│  Async Poll Loop (one per video)        │
+│  ┌─────────┐ ┌─────────┐ ┌─────────┐  │
+│  │ Poll #1 │ │ Poll #2 │ │ Poll #3 │  │
+│  │ backoff │ │ backoff │ │ backoff │  │
+│  │ 5s→10s  │ │ 5s→10s  │ │ 5s→10s  │  │
+│  └────┬────┘ └────┬────┘ └────┬────┘  │
+│       └─────────────┴───────────┘       │
+│              asyncio.gather()           │
+└─────────────────────────────────────────┘
+Key insight: Video generation wall time ≈ slowest video, not sum. We poll all concurrently with exponential backoff (5s, 10s, 20s, 30s cap).
+STEP 4: CONFIGURATION DESIGN
+Config Hierarchy (precedence: high to low)
+CLI arguments (--concurrency 5)
+Job-specific config (workflow.yaml)
+User defaults (~/.magnific/config.yaml)
+System defaults (embedded in package)
+What Goes Into Config
+Table
+Category	Examples	Why External
+Models	gemini_model: "gemini-2.5-pro", veo_model: "veo-2"	Easy A/B testing, model upgrades
+Prompts	story_system_prompt, preview_negative_prompt	Prompt engineering without deploy
+Paths	output_dir, temp_dir	Environment-specific
+Retries	max_retries: 5, backoff_base: 2.0	Tuning for different APIs
+Concurrency	preview_workers: 3, video_poll_interval: 5	Rate limit adaptation
+Safety	skip_on_safety_block: true	Business logic tuning
+Example workflow.yaml
+yaml
+Copy
+# Magnific Workflow Configuration
+version: "1.0"
+
+job:
+  name: "couple_daily_life"
+  output_dir: "./output"
+
+models:
+  story:
+    provider: google
+    model: gemini-2.5-pro
+    temperature: 0.7
+    max_tokens: 4096
+  
+  preview:
+    provider: google
+    model: imagen-3
+    aspect_ratio: "16:9"
+    negative_prompt: "blurry, distorted faces, extra limbs"
+  
+  video:
+    provider: google
+    model: veo-2
+    duration_seconds: 5
+    aspect_ratio: "16:9"
+
+pipeline:
+  story:
+    system_prompt: |
+      You are a cinematic storyboard writer. Given character references and a creative brief,
+      generate {num_scenes} scene descriptions. Each scene must include:
+      - title: Short cinematic title
+      - prompt: Detailed image generation prompt emphasizing character consistency
+      
+      Return valid JSON matching the schema.
+    num_scenes: 5
+  
+  preview:
+    max_concurrent: 3
+    rate_limit_rpm: 10
+  
+  video:
+    max_concurrent_polls: 10
+    poll_interval_seconds: 5
+    poll_backoff_multiplier: 2.0
+    max_poll_minutes: 30
+
+resilience:
+  max_retries: 5
+  retry_base_delay: 1.0
+  retry_max_delay: 60.0
+  skip_on_safety_block: true
+  fail_fast: false
+Validation Strategy
+Use Pydantic v2 for config validation:
+Type coercion and validation on load
+Clear error messages for missing fields
+Environment variable substitution (${GOOGLE_API_KEY})
+STEP 5: FAILURE HANDLING & RESILIENCE
+Failure Scenarios & Responses
+Table
+Scenario	Detection	Response	Manifest Update
+Rate limit (429)	HTTP status	Exponential backoff, retry	status: "retrying"
+Timeout	requests.Timeout	Retry with backoff	status: "retrying"
+Safety filter	API error / empty output	Skip scene if configured, or fail	status: "blocked", error: "safety"
+Invalid JSON	json.JSONDecodeError	Retry with stricter prompt, then skip	status: "failed"
+Schema validation fail	Pydantic ValidationError	Log details, skip scene	status: "failed"
+Corrupt image	PIL UnidentifiedImageError	Skip scene	status: "failed"
+Disk full	OSError (ENOSPC)	Immediate fail, preserve state	Pipeline halt
+API key invalid	401/403	Fail fast, no retry	Pipeline halt
+Retry Strategy
+Python
+Copy
+@dataclass
+class RetryPolicy:
+    max_retries: int = 5
+    base_delay: float = 1.0
+    max_delay: float = 60.0
+    exponential_base: float = 2.0
+    retryable_statuses: set[int] = field(default_factory=lambda: {429, 500, 502, 503, 504})
+    
+    def calculate_delay(self, attempt: int) -> float:
+        delay = self.base_delay * (self.exponential_base ** attempt)
+        return min(delay, self.max_delay) + random.uniform(0, 1)  # Jitter
+Idempotency
+Stage 1: Deterministic given same seed (if supported) or re-runnable
+Stage 2: Overwrites existing previews if re-run (idempotent)
+Stage 3: Re-submits videos if re-run (Veo generates new videos each time—acceptable)
+Resume Logic
+Python
+Copy
+def determine_resume_point(job_dir: Path) -> Optional[str]:
+    """Check manifests to find where to resume."""
+    if not (job_dir / "manifest_03_video.json").exists():
+        if (job_dir / "manifest_02_preview.json").exists():
+            return "video"
+        if (job_dir / "manifest_01_story.json").exists():
+            return "preview"
+    return None
+STEP 6: EXTENSIBILITY DESIGN
+Adding a New Stage (e.g., Audio Generation)
+Create agent: src/magnific/agents/audio_agent.py
+Implement interface: AudioAgent(BaseAgent)
+Add manifest model: AudioManifest in src/magnific/models/manifests.py
+Register in orchestrator: Add to STAGE_REGISTRY
+Add config section: audio: in workflow.yaml
+No changes to existing stages. The orchestrator iterates STAGE_REGISTRY in order.
+Swapping Providers (Gemini → OpenAI)
+Python
+Copy
+# Abstract base
+class StoryProvider(ABC):
+    @abstractmethod
+    def generate_scenes(self, idea: str, images: list[Path], config: Config) -> SceneList:
+        ...
+
+# Concrete implementations
+class GeminiStoryProvider(StoryProvider): ...
+class OpenAIStoryProvider(StoryProvider): ...
+
+# Factory
+def get_story_provider(config: ProviderConfig) -> StoryProvider:
+    providers = {"google": GeminiStoryProvider, "openai": OpenAIStoryProvider}
+    return providers[config.provider](config)
+Plugin Architecture
+Python
+Copy
+# Entry points in pyproject.toml
+[project.entry-points."magnific.story_providers"]
+google = "magnific.providers.story:GeminiStoryProvider"
+openai = "magnific.providers.story:OpenAIStoryProvider"
+
+# Runtime discovery
+import importlib.metadata
+providers = importlib.metadata.entry_points(group="magnific.story_providers")
+STEP 7: PROJECT STRUCTURE
+plain
+Copy
+magnific/
+├── pyproject.toml
+├── README.md
+├── ARCHITECTURE.md
+├── CHANGELOG.md
+├── requirements.txt
+├── requirements-dev.txt
+├── src/
+│   └── magnific/
+│       ├── __init__.py
+│       ├── __main__.py          # python -m magnific
+│       ├── cli.py               # argparse, command dispatch
+│       ├── config/
+│       │   ├── __init__.py
+│       │   ├── loader.py        # YAML/JSON/TOML loading
+│       │   ├── models.py        # Pydantic config schemas
+│       │   └── defaults.py      # Built-in defaults
+│       ├── core/
+│       │   ├── __init__.py
+│       │   ├── job.py           # JobContext, directory management
+│       │   ├── orchestrator.py  # Stage execution, resume logic
+│       │   └── manifest.py      # Manifest I/O, validation
+│       ├── agents/
+│       │   ├── __init__.py
+│       │   ├── base.py          # BaseAgent ABC
+│       │   ├── story.py         # Gemini story generation
+│       │   ├── preview.py       # Image generation
+│       │   └── video.py         # Veo video generation
+│       ├── providers/
+│       │   ├── __init__.py
+│       │   ├── base.py          # Provider ABCs
+│       │   ├── google.py        # Google GenAI wrapper
+│       │   └── factory.py       # Provider instantiation
+│       ├── models/
+│       │   ├── __init__.py
+│       │   ├── manifests.py     # Pydantic manifest schemas
+│       │   └── scenes.py        # Scene, Preview, Video dataclasses
+│       ├── utils/
+│       │   ├── __init__.py
+│       │   ├── retry.py         # RetryPolicy, decorators
+│       │   ├── rate_limiter.py  # Token bucket
+│       │   ├── logging.py       # Structured logging
+│       │   └── paths.py         # Path resolution
+│       └── templates/
+│           └── default_config.yaml
+├── tests/
+│   ├── __init__.py
+│   ├── conftest.py              # Shared fixtures
+│   ├── test_config.py
+│   ├── test_job.py
+│   ├── test_manifest.py
+│   ├── test_orchestrator.py
+│   ├── test_retry.py
+│   ├── test_story_agent.py
+│   ├── test_preview_agent.py
+│   └── test_video_agent.py
+└── examples/
+    └── sample_workflow.yaml
+Rationale:
+config/: Separation of concerns—loading vs. schema vs. defaults
+agents/: Business logic isolated from provider details
+providers/: Swappable implementations behind ABCs
+models/: Single source of truth for data shapes
+utils/: Shared, stateless utilities
+STEP 8: CLI DESIGN
+Commands
+Table
+Command	Purpose	Example
+generate-config	Create workflow from idea	python -m magnific generate-config --idea "couple daily life" --output workflow.yaml
+run	Execute pipeline	python -m magnific run --config workflow.yaml --refs char1.jpg char2.jpg
+run --from-stage	Resume pipeline	python -m magnific run --config workflow.yaml --from-stage preview
+status	Inspect job	python -m magnific status --job-id <uuid>
+Behavior Details
+generate-config
+Accepts --idea (required), --num-scenes (default: 5), --output (default: magnific_workflow.yaml)
+Populates template with user idea
+Includes sensible defaults for all models
+run
+Load config
+Create job directory with UUID
+Copy config to job dir (reproducibility)
+Determine start stage (from CLI or auto-detect)
+Execute stages sequentially
+Write manifest after each stage
+On failure: write partial manifest, log error, exit non-zero
+run --from-stage
+Validates that previous stage manifest exists
+Loads parent manifest as input
+Skips completed stages
+status
+Reads job directory manifests
+Reports: job_id, current stage, scenes completed/total, any failures
+Exit 0 if complete, 1 if failed, 2 if running (for scripting)
+STEP 9: TESTING STRATEGY
+Unit Tests (mock external APIs)
+Table
+Module	What to Test	Mock Strategy
+config.loader	Load/merge/validate	File system mocks
+core.job	Directory creation, UUID	tmp_path fixture
+core.manifest	Save/load, validation	Pydantic validation
+agents.story	Prompt formatting, JSON parsing	Mock Gemini client
+agents.preview	Concurrent execution, rate limiting	Mock image API, ThreadPoolExecutor
+agents.video	Polling logic, timeout	Mock Veo client, asyncio
+utils.retry	Backoff calculation, jitter	Deterministic random seed
+utils.rate_limiter	Token bucket accuracy	Time mocking
+Integration Tests
+End-to-end with mocked providers: Verify pipeline orchestration
+Manifest chain: Ensure v1 → v2 → v3 transforms correctly
+Resume logic: Create partial manifests, verify correct restart point
+Failure Simulation
+Python
+Copy
+# pytest fixture for flaky provider
+@pytest.fixture
+def failing_provider():
+    class FailingProvider:
+        def __init__(self, fail_count=2):
+            self.fail_count = fail_count
+            self.calls = 0
+        
+        def generate(self, *args):
+            self.calls += 1
+            if self.calls <= self.fail_count:
+                raise RateLimitError()
+            return "success"
+    return FailingProvider
+STEP 10: SELF-CRITIQUE
+Weak Points
+No persistent queue: If the process crashes mid-poll, video operation IDs are lost. Mitigation: save operation IDs to manifest immediately after submission.
+File-based state: Doesn't scale to distributed execution. For single-machine evaluation, this is correct; for production, we'd add Redis/PostgreSQL.
+No content addressing: Re-running with same inputs regenerates everything. Could add content-hash caching.
+Polling inefficiency: Fixed intervals rather than webhook/callback. Veo doesn't support webhooks, so this is unavoidable.
+Over-Engineering Risks
+Avoided: Full async/await throughout (unnecessary complexity)
+Avoided: Microservices (single Python package is correct for this scale)
+Avoided: Database layer (filesystem is sufficient)
+Scalability Limitations
+Max concurrent scenes limited by preview.max_concurrent (configurable)
+Disk usage grows linearly with scenes × stages
+No garbage collection of old jobs
+What I'd Improve With More Time
+Add SQLite state store for operation ID persistence and job querying
+Implement content-addressable cache to skip re-generation of identical previews
+Add structured logging (JSON) with correlation IDs for observability
+Add progress bars (tqdm/rich) for CLI UX
+Add pre-flight checks (API key validation, disk space, model availability)
+STEP 11: IMPLEMENTATION PLAN
+Phase 1: Foundation (30 min)
+Initialize repo, pyproject.toml, directory structure
+Implement config/ module (Pydantic models, loader, defaults)
+Implement core/job.py (JobContext with UUID and paths)
+Implement core/manifest.py (Manifest I/O with Pydantic)
+Phase 2: Utilities (20 min)
+utils/retry.py — Decorator-based retry with exponential backoff
+utils/rate_limiter.py — Thread-safe token bucket
+utils/logging.py — Structured logger setup
+Phase 3: Providers (20 min)
+providers/base.py — ABCs for Story, Preview, Video providers
+providers/google.py — Google GenAI SDK wrapper
+providers/factory.py — Provider instantiation from config
+Phase 4: Agents (40 min)
+agents/base.py — BaseAgent with manifest handling
+agents/story.py — Gemini prompt engineering, JSON schema validation
+agents/preview.py — ThreadPool concurrent image generation
+agents/video.py — Async polling for Veo completion
+Phase 5: Orchestration (20 min)
+core/orchestrator.py — Stage execution, resume logic, error handling
+cli.py — Argument parsing, command dispatch
+Phase 6: Testing (30 min)
+Unit tests for all modules with mocked APIs
+Integration test for manifest chain
+Failure simulation tests
+Phase 7: Documentation (20 min)
+README.md — Setup, usage, testing
+ARCHITECTURE.md — This document
+CHANGELOG.md — Design decisions
