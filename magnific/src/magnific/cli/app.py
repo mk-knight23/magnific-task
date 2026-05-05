@@ -37,6 +37,7 @@ def main():
 @click.option("--output", "-o", default="workflow.yaml", type=Path, help="Output config file path")
 @click.option("--scene-count", type=int, default=5, help="Number of scenes to generate")
 @click.option("--duration", type=int, default=5, help="Video duration per scene (seconds)")
+@click.option("--interactive", is_flag=True, help="Enable LLM-driven interactive refinement")
 def generate_config(
     idea: str,
     ref1: Path,
@@ -44,8 +45,13 @@ def generate_config(
     output: Path,
     scene_count: int,
     duration: int,
+    interactive: bool,
 ):
-    """Generate a workflow configuration file from a creative idea."""
+    """Generate a workflow configuration file from a creative idea.
+    
+    With --interactive flag: LLM helps refine your idea and suggests scenes.
+    Without flag: Static template generation (original behavior).
+    """
     try:
         # Validate inputs
         if not ref1.exists():
@@ -55,21 +61,101 @@ def generate_config(
             console.print(f"[red]Error: Reference image 2 not found: {ref2}[/red]")
             raise SystemExit(1)
         
-        console.print(f"[blue]Generating workflow config...[/blue]")
-        console.print(f"  Idea: {idea[:50]}...")
-        console.print(f"  References: {ref1.name}, {ref2.name}")
+        if interactive:
+            # NEW: Interactive LLM-driven generation
+            console.print("[blue]Starting interactive LLM session...[/blue]")
+            console.print(f"  Idea: {idea[:50]}...")
+            console.print(f"  References: {ref1.name}, {ref2.name}")
+            console.print()
+            
+            # Import workflow generator
+            from magnific.workflow.interactive_generator import InteractiveWorkflowGenerator
+            
+            generator = InteractiveWorkflowGenerator()
+            
+            # Start interactive session
+            import asyncio
+            session = asyncio.run(
+                generator.start_session(
+                    idea=idea,
+                    reference_images=[ref1, ref2]
+                )
+            )
+            
+            # Display character analysis
+            if session.character_analysis:
+                console.print("[green]Character Analysis:[/green]")
+                console.print(f"  {session.character_analysis[:200]}...")
+                console.print()
+            
+            # Display suggested scenes
+            if session.suggested_scenes:
+                console.print("[yellow]Suggested Scenes:[/yellow]")
+                for scene in session.suggested_scenes:
+                    title = scene.get("title", "Untitled")
+                    console.print(f"  {scene.get('scene_number', '?')}. {title}")
+                console.print()
+            
+            # Display tone/setting suggestions
+            if session.tone:
+                console.print(f"[cyan]Suggested Tone: {session.tone}[/cyan]")
+            if session.setting:
+                console.print(f"[cyan]Suggested Setting: {session.setting}[/cyan]")
+            console.print()
+            
+            # Interactive refinement loop
+            console.print("[bold]Interactive Refinement[/bold]")
+            console.print("Type 'generate' to create config, or provide refinements:")
+            console.print()
+            
+            while True:
+                user_input = console.input("[cyan]Your input: [/cyan]")
+                
+                if user_input.lower().strip() == "generate":
+                    # Generate final config
+                    console.print("[blue]Generating final config...[/blue]")
+                    config = asyncio.run(
+                        generator.generate_config(session, output)
+                    )
+                    console.print(f"[green]✓ Config written to: {output}[/green]")
+                    console.print()
+                    console.print("[yellow]Next steps:[/yellow]")
+                    console.print("  1. Set GOOGLE_API_KEY environment variable")
+                    console.print("  2. Set GOOGLE_CLOUD_PROJECT environment variable")
+                    console.print("  3. Run: magnific run --config {output}")
+                    break
+                
+                # Refine with user input
+                console.print("[blue]Refining suggestions...[/blue]")
+                session = asyncio.run(
+                    generator.refine(session, user_input)
+                )
+                
+                # Display updated scenes
+                if session.suggested_scenes:
+                    console.print("[green]Updated Scenes:[/green]")
+                    for scene in session.suggested_scenes:
+                        title = scene.get("title", "Untitled")
+                        console.print(f"  {scene.get('scene_number', '?')}. {title}")
+                    console.print()
         
-        # Generate config
-        config = ConfigLoader.generate_workflow_config(
-            idea=idea,
-            reference_images=[ref1, ref2],
-            output_path=output,
-        )
-        
-        console.print(f"[green]✓ Config written to: {output}[/green]")
-        console.print(f"\n[yellow]Next steps:[/yellow]")
-        console.print(f"  1. Set GOOGLE_API_KEY environment variable")
-        console.print(f"  2. Run: magnific run --config {output}")
+        else:
+            # Original: Static template generation
+            console.print(f"[blue]Generating workflow config...[/blue]")
+            console.print(f"  Idea: {idea[:50]}...")
+            console.print(f"  References: {ref1.name}, {ref2.name}")
+            
+            # Generate config
+            config = ConfigLoader.generate_workflow_config(
+                idea=idea,
+                reference_images=[ref1, ref2],
+                output_path=output,
+            )
+            
+            console.print(f"[green]✓ Config written to: {output}[/green]")
+            console.print(f"\n[yellow]Next steps:[/yellow]")
+            console.print(f"  1. Set GOOGLE_API_KEY environment variable")
+            console.print(f"  2. Run: magnific run --config {output}")
         
     except MagnificError as e:
         console.print(f"[red]Error: {e}[/red]")

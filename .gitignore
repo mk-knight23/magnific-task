@@ -69,3 +69,5 @@ docs/_build/
 
 # Ruff
 .ruff_cache/
+# Graphify outputs
+graphify-out/

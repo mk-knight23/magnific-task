@@ -1,7 +1,17 @@
-"""Google Imagen provider for preview image generation."""
+"""Google Imagen provider for preview image generation.
+
+Verified model names from Google Cloud documentation:
+- imagen-3.0-generate-002 (Imagen 3, verified)
+- imagegeneration@006 (Legacy verified name)
+
+Note: Vertex AI SDK is synchronous - requires thread executor for async.
+Unlike Veo (REST), Imagen SDK has no native async support.
+
+Reference:
+https://cloud.google.com/vertex-ai/generative-ai/docs/image/overview
+"""
 
 import asyncio
-import base64
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
@@ -14,17 +24,25 @@ from magnific.providers.google.client import GoogleClient
 if TYPE_CHECKING:
     from magnific.core.security import JailedPath
 
+VERIFIED_IMAGEN_MODELS = ["imagen-3.0-generate-002", "imagegeneration@006"]
+
 
 class GoogleImagenProvider(ImageProvider):
-    """
-    Google Imagen provider for preview image generation.
+    """Google Imagen provider for preview image generation.
     
-    Uses Vertex AI Imagen API (synchronous).
-    Should be wrapped in thread executor for async contexts.
+    Uses VERIFIED Vertex AI Imagen model names.
     
-    Memory optimization: Implements byte cache for reference images
-    to prevent loading same images multiple times during concurrent
-    scene generation.
+    SDK nature: SYNCHRONOUS (no native async)
+    Pattern: Thread executor for async contexts (correct)
+    
+    Why thread executor?
+    - Vertex AI vision_models SDK is blocking
+    - No aiohttp-style async available
+    - Thread executor is the correct pattern here
+    
+    Memory optimization: Byte cache for reference images
+    to prevent loading same images multiple times during
+    concurrent scene generation.
     """
     
     def __init__(self):
@@ -56,10 +74,12 @@ class GoogleImagenProvider(ImageProvider):
         output_path: "JailedPath",
         config: PreviewModelConfig,
     ) -> ImageResult:
-        """
-        Generate a preview image using Imagen 4.
+        """Generate a preview image using VERIFIED Imagen model.
         
-        Imagen 4 supports text-to-image generation with high quality.
+        Imagen 3 verified model names:
+        - imagen-3.0-generate-002 (recommended)
+        - imagegeneration@006 (legacy)
+        
         Prompt enhancement should be done by the stage layer, not provider.
         """
         ImageGenerationModel = self._init_client()
@@ -67,9 +87,18 @@ class GoogleImagenProvider(ImageProvider):
         
         output_path.parent.mkdir(parents=True, exist_ok=True)
         
+        # Use VERIFIED model name
+        model_name = config.name or "imagen-3.0-generate-002"
+        
+        if model_name not in VERIFIED_IMAGEN_MODELS:
+            return ImageResult(
+                success=False,
+                error=f"Unverified model '{model_name}'. Use: {VERIFIED_IMAGEN_MODELS}"
+            )
+        
         try:
-            # Load model
-            model = ImageGenerationModel.from_pretrained(config.name)
+            # Load VERIFIED model
+            model = ImageGenerationModel.from_pretrained(model_name)
             
             # Generate image (prompt already enhanced by stage)
             response = model.generate_images(
@@ -81,7 +110,7 @@ class GoogleImagenProvider(ImageProvider):
                 # person_generation=config.person_generation,  # Removed for now
             )
             
-            # Handle response (Imagen 4 returns 'images' attribute)
+            # Handle response (Imagen 3 returns 'images' attribute)
             if response:
                 # Try both possible response structures
                 if hasattr(response, 'images') and len(response.images) > 0:
@@ -91,7 +120,7 @@ class GoogleImagenProvider(ImageProvider):
                 else:
                     return ImageResult(
                         success=False,
-                        error="No images generated in response",
+                        error="No images generated in response"
                     )
                 
                 # Save the generated image
@@ -102,12 +131,12 @@ class GoogleImagenProvider(ImageProvider):
                 return ImageResult(
                     success=True,
                     image_path=output_path,
-                    generation_time_ms=int(elapsed * 1000),
+                    generation_time_ms=int(elapsed * 1000)
                 )
             else:
                 return ImageResult(
                     success=False,
-                    error="Empty response from Imagen",
+                    error="Empty response from Imagen"
                 )
         
         except Exception as e:
@@ -116,12 +145,12 @@ class GoogleImagenProvider(ImageProvider):
             if "safety" in error_str or "blocked" in error_str or "content policy" in error_str:
                 return ImageResult(
                     success=False,
-                    error=f"Safety filter blocked: {e}",
+                    error=f"Safety filter blocked: {e}"
                 )
             
             return ImageResult(
                 success=False,
-                error=f"Imagen API error: {e}",
+                error=f"Imagen API error: {e}"
             )
     
     def get_cached_bytes(self, path: "JailedPath") -> Optional[bytes]:
@@ -144,3 +173,15 @@ class GoogleImagenProvider(ImageProvider):
     def clear_cache(self) -> None:
         """Clear byte cache to free memory."""
         self._byte_cache.clear()
+    
+    def _get_mime_type(self, path: "JailedPath") -> str:
+        """Get MIME type from file extension."""
+        ext = path.suffix.lower()
+        mime_map = {
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".png": "image/png",
+            ".webp": "image/webp",
+            ".gif": "image/gif",
+        }
+        return mime_map.get(ext, "image/jpeg")
